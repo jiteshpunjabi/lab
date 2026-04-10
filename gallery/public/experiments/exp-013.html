@@ -1,0 +1,416 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>exp-013 — Resonant Colony</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: #06060f;
+    overflow: hidden;
+    font-family: 'Courier New', monospace;
+  }
+  canvas { display: block; }
+  #info {
+    position: fixed;
+    bottom: 14px;
+    left: 14px;
+    color: #334466;
+    font-size: 10px;
+    pointer-events: none;
+  }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="info">exp-013 / resonant colony / click to divide</div>
+<script>
+(function() {
+  const canvas = document.getElementById('c');
+  const ctx = canvas.getContext('2d');
+  let W, H;
+
+  function resize() {
+    W = canvas.width = window.innerWidth;
+    H = canvas.height = window.innerHeight;
+  }
+  resize();
+  window.addEventListener('resize', resize);
+
+  // Audio context — lazy init on click
+  let audioCtx = null;
+  let masterGain = null;
+
+  function ensureAudio() {
+    if (audioCtx) return;
+    audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    masterGain = audioCtx.createGain();
+    masterGain.gain.value = 0.08;
+    masterGain.connect(audioCtx.destination);
+  }
+
+  // Colony state
+  const cells = [];
+  let time = 0;
+  const harmonicRatios = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12];
+  const baseFreq = 110;
+
+  class Cell {
+    constructor(x, y, radius, generation, harmonicIndex) {
+      this.x = x;
+      this.y = y;
+      this.radius = radius;
+      this.targetRadius = radius;
+      this.generation = generation;
+      this.harmonicIndex = harmonicIndex;
+      this.age = 0;
+      this.phase = Math.random() * Math.PI * 2;
+      this.breatheSpeed = 0.8 + harmonicIndex * 0.3;
+      this.hue = 200 + harmonicIndex * 25;
+      this.children = [];
+      this.dividing = false;
+      this.divideProgress = 0;
+      this.divideAngle = Math.random() * Math.PI * 2;
+      this.alive = true;
+      this.birthTime = time;
+
+      // Organelles
+      this.organelleCount = 2 + Math.floor(Math.random() * 3);
+      this.organellePhases = [];
+      this.organelleSpeeds = [];
+      this.organelleHues = [];
+      for (let i = 0; i < this.organelleCount; i++) {
+        this.organellePhases.push(Math.random() * Math.PI * 2);
+        this.organelleSpeeds.push(0.5 + Math.random() * 1.5);
+        this.organelleHues.push(this.hue + 40 + Math.random() * 80);
+      }
+
+      // Sound
+      this.osc = null;
+      this.gainNode = null;
+      if (audioCtx && harmonicIndex < harmonicRatios.length) {
+        this.osc = audioCtx.createOscillator();
+        this.gainNode = audioCtx.createGain();
+        this.osc.type = harmonicIndex < 3 ? 'sine' : (harmonicIndex < 6 ? 'triangle' : 'square');
+        this.osc.frequency.value = baseFreq * harmonicRatios[harmonicIndex % harmonicRatios.length];
+        this.gainNode.gain.value = 0;
+        this.osc.connect(this.gainNode);
+        this.gainNode.connect(masterGain);
+        this.osc.start();
+      }
+    }
+
+    update(dt) {
+      this.age += dt;
+
+      // Breathing
+      const breathe = Math.sin(this.age * this.breatheSpeed + this.phase) * 0.08;
+      this.radius = this.targetRadius * (1 + breathe);
+
+      // Sound — gentle volume pulsing synced to breathing
+      if (this.gainNode && audioCtx) {
+        const vol = 0.02 + 0.03 * (0.5 + 0.5 * Math.sin(this.age * this.breatheSpeed + this.phase));
+        const fadeIn = Math.min(1, this.age / 2);
+        this.gainNode.gain.setTargetAtTime(vol * fadeIn / (1 + this.generation * 0.3), audioCtx.currentTime, 0.1);
+      }
+
+      // Division animation
+      if (this.dividing) {
+        this.divideProgress += dt * 0.25;
+        if (this.divideProgress >= 1) {
+          this.completeDivision();
+        }
+      }
+    }
+
+    startDivide() {
+      if (this.dividing || cells.length >= 16) return;
+      this.dividing = true;
+      this.divideProgress = 0;
+      this.divideAngle = Math.random() * Math.PI * 2;
+    }
+
+    completeDivision() {
+      this.dividing = false;
+      this.divideProgress = 0;
+
+      const newRadius = this.targetRadius * 0.72;
+      this.targetRadius = newRadius;
+
+      const dist = newRadius * 2.5;
+      const dx = Math.cos(this.divideAngle) * dist;
+      const dy = Math.sin(this.divideAngle) * dist;
+
+      // Push self
+      this.x -= dx * 0.5;
+      this.y -= dy * 0.5;
+
+      // Create daughter
+      const daughter = new Cell(
+        this.x + dx,
+        this.y + dy,
+        newRadius,
+        this.generation + 1,
+        cells.length % harmonicRatios.length
+      );
+      this.children.push(daughter);
+      cells.push(daughter);
+
+      // Resolve overlaps
+      resolveOverlaps();
+    }
+
+    draw() {
+      const cx = this.x;
+      const cy = this.y;
+      const r = this.radius;
+      const pulse = 0.5 + 0.5 * Math.sin(this.age * this.breatheSpeed + this.phase);
+
+      // Membrane glow
+      ctx.beginPath();
+      ctx.arc(cx, cy, r + 4, 0, Math.PI * 2);
+      ctx.strokeStyle = `hsla(${this.hue}, 70%, 50%, ${0.15 + pulse * 0.15})`;
+      ctx.lineWidth = 2;
+      ctx.stroke();
+
+      // Outer glow
+      const outerGrad = ctx.createRadialGradient(cx, cy, r * 0.8, cx, cy, r * 1.4);
+      outerGrad.addColorStop(0, 'transparent');
+      outerGrad.addColorStop(0.5, `hsla(${this.hue}, 60%, 40%, ${0.05 + pulse * 0.05})`);
+      outerGrad.addColorStop(1, 'transparent');
+      ctx.fillStyle = outerGrad;
+      ctx.fillRect(cx - r * 1.5, cy - r * 1.5, r * 3, r * 3);
+
+      // Cell body — layered gradients like exp-008's nucleus
+      const bodyGrad = ctx.createRadialGradient(cx - r * 0.2, cy - r * 0.2, 0, cx, cy, r);
+      bodyGrad.addColorStop(0, `hsla(${this.hue + 60}, 80%, 70%, ${0.6 + pulse * 0.2})`);
+      bodyGrad.addColorStop(0.3, `hsla(${this.hue + 30}, 70%, 45%, 0.5)`);
+      bodyGrad.addColorStop(0.6, `hsla(${this.hue}, 60%, 25%, 0.35)`);
+      bodyGrad.addColorStop(1, `hsla(${this.hue - 20}, 50%, 10%, 0.1)`);
+      ctx.beginPath();
+      ctx.arc(cx, cy, r, 0, Math.PI * 2);
+      ctx.fillStyle = bodyGrad;
+      ctx.fill();
+
+      // Nucleus hot core
+      const nucleusR = r * 0.35;
+      const nucleusGrad = ctx.createRadialGradient(cx, cy, 0, cx, cy, nucleusR);
+      nucleusGrad.addColorStop(0, `hsla(${this.hue + 80}, 90%, 85%, ${0.5 + pulse * 0.3})`);
+      nucleusGrad.addColorStop(0.5, `hsla(${this.hue + 40}, 80%, 55%, 0.3)`);
+      nucleusGrad.addColorStop(1, 'transparent');
+      ctx.beginPath();
+      ctx.arc(cx, cy, nucleusR, 0, Math.PI * 2);
+      ctx.fillStyle = nucleusGrad;
+      ctx.fill();
+
+      // Organelles
+      for (let i = 0; i < this.organelleCount; i++) {
+        const angle = this.organellePhases[i] + this.age * this.organelleSpeeds[i];
+        const orbR = r * 0.55;
+        const ox = cx + Math.cos(angle) * orbR;
+        const oy = cy + Math.sin(angle) * orbR;
+        const orgSize = r * 0.1;
+
+        ctx.beginPath();
+        ctx.arc(ox, oy, orgSize, 0, Math.PI * 2);
+        ctx.fillStyle = `hsla(${this.organelleHues[i] % 360}, 80%, 60%, ${0.4 + pulse * 0.3})`;
+        ctx.fill();
+      }
+
+      // Harmonic resonance rings — visible vibration at cell's frequency
+      const ringCount = Math.min(this.harmonicIndex + 1, 4);
+      for (let i = 0; i < ringCount; i++) {
+        const ringR = r + 8 + i * 6;
+        const ringPulse = Math.sin(this.age * this.breatheSpeed * 2 + i * Math.PI / ringCount);
+        if (ringPulse > 0) {
+          ctx.beginPath();
+          ctx.arc(cx, cy, ringR + ringPulse * 3, 0, Math.PI * 2);
+          ctx.strokeStyle = `hsla(${this.hue + i * 30}, 60%, 50%, ${ringPulse * 0.15})`;
+          ctx.lineWidth = 1;
+          ctx.stroke();
+        }
+      }
+
+      // Division animation
+      if (this.dividing) {
+        const p = this.divideProgress;
+        const pinch = Math.sin(p * Math.PI);
+        const sep = p * r * 1.5;
+
+        // Chromatin bridge
+        const bx1 = cx - Math.cos(this.divideAngle) * sep;
+        const by1 = cy - Math.sin(this.divideAngle) * sep;
+        const bx2 = cx + Math.cos(this.divideAngle) * sep;
+        const by2 = cy + Math.sin(this.divideAngle) * sep;
+
+        ctx.beginPath();
+        ctx.moveTo(bx1, by1);
+        ctx.lineTo(bx2, by2);
+        const bridgeGrad = ctx.createLinearGradient(bx1, by1, bx2, by2);
+        bridgeGrad.addColorStop(0, `hsla(${this.hue + 40}, 80%, 60%, ${pinch * 0.6})`);
+        bridgeGrad.addColorStop(0.5, `hsla(${this.hue + 80}, 90%, 80%, ${pinch * 0.8})`);
+        bridgeGrad.addColorStop(1, `hsla(${this.hue + 120}, 80%, 60%, ${pinch * 0.6})`);
+        ctx.strokeStyle = bridgeGrad;
+        ctx.lineWidth = 4 * (1 - p);
+        ctx.stroke();
+
+        // Daughter forming
+        ctx.beginPath();
+        ctx.arc(bx2, by2, r * 0.5 * p, 0, Math.PI * 2);
+        const dGrad = ctx.createRadialGradient(bx2, by2, 0, bx2, by2, r * 0.5 * p);
+        dGrad.addColorStop(0, `hsla(${this.hue + 60}, 80%, 70%, ${p * 0.5})`);
+        dGrad.addColorStop(1, `hsla(${this.hue}, 60%, 30%, ${p * 0.2})`);
+        ctx.fillStyle = dGrad;
+        ctx.fill();
+      }
+    }
+
+    destroy() {
+      if (this.osc) {
+        this.osc.stop();
+        this.osc.disconnect();
+        this.gainNode.disconnect();
+      }
+    }
+  }
+
+  // Resolve overlapping cells — gentle repulsion
+  function resolveOverlaps() {
+    for (let iter = 0; iter < 10; iter++) {
+      for (let i = 0; i < cells.length; i++) {
+        for (let j = i + 1; j < cells.length; j++) {
+          const a = cells[i], b = cells[j];
+          const dx = b.x - a.x;
+          const dy = b.y - a.y;
+          const dist = Math.sqrt(dx * dx + dy * dy);
+          const minDist = a.targetRadius + b.targetRadius + 8;
+          if (dist < minDist && dist > 0) {
+            const push = (minDist - dist) / 2;
+            const nx = dx / dist;
+            const ny = dy / dist;
+            a.x -= nx * push;
+            a.y -= ny * push;
+            b.x += nx * push;
+            b.y += ny * push;
+          }
+        }
+      }
+    }
+    // Keep cells on screen
+    for (const c of cells) {
+      c.x = Math.max(c.targetRadius, Math.min(W - c.targetRadius, c.x));
+      c.y = Math.max(c.targetRadius, Math.min(H - c.targetRadius, c.y));
+    }
+  }
+
+  // Draw inter-cell connections — harmonic bonds
+  function drawBonds() {
+    for (let i = 0; i < cells.length; i++) {
+      for (let j = i + 1; j < cells.length; j++) {
+        const a = cells[i], b = cells[j];
+        const dx = b.x - a.x;
+        const dy = b.y - a.y;
+        const dist = Math.sqrt(dx * dx + dy * dy);
+        const maxDist = (a.targetRadius + b.targetRadius) * 4;
+
+        if (dist < maxDist) {
+          const alpha = (1 - dist / maxDist) * 0.15;
+          const pulse = 0.5 + 0.5 * Math.sin(time * 2 + i + j);
+
+          ctx.beginPath();
+          ctx.moveTo(a.x, a.y);
+          ctx.lineTo(b.x, b.y);
+
+          const hue = (a.hue + b.hue) / 2;
+          ctx.strokeStyle = `hsla(${hue}, 50%, 50%, ${alpha * pulse})`;
+          ctx.lineWidth = 1;
+          ctx.stroke();
+        }
+      }
+    }
+  }
+
+  // Seed the colony with one ancestor cell
+  cells.push(new Cell(W / 2, H / 2, 60, 0, 0));
+
+  // Auto-divide timer for ambient growth
+  let nextAutoDivide = 3;
+
+  // Click to trigger division on nearest cell
+  document.addEventListener('click', function(e) {
+    ensureAudio();
+
+    // Find nearest cell
+    let nearest = null;
+    let nearDist = Infinity;
+    for (const c of cells) {
+      const dx = e.clientX - c.x;
+      const dy = e.clientY - c.y;
+      const d = Math.sqrt(dx * dx + dy * dy);
+      if (d < nearDist) {
+        nearDist = d;
+        nearest = c;
+      }
+    }
+    if (nearest && !nearest.dividing) {
+      nearest.startDivide();
+    }
+  });
+
+  function draw() {
+    const dt = 0.016;
+    time += dt;
+
+    // Fade
+    ctx.fillStyle = 'rgba(6, 6, 15, 0.12)';
+    ctx.fillRect(0, 0, W, H);
+
+    // Auto-divide for ambient growth
+    nextAutoDivide -= dt;
+    if (nextAutoDivide <= 0 && cells.length < 12) {
+      // Pick a random non-dividing cell
+      const candidates = cells.filter(c => !c.dividing && c.targetRadius > 20);
+      if (candidates.length > 0) {
+        const pick = candidates[Math.floor(Math.random() * candidates.length)];
+        pick.startDivide();
+      }
+      nextAutoDivide = 4 + Math.random() * 4;
+    }
+
+    // Update all
+    for (const c of cells) c.update(dt);
+
+    // Gentle gravity toward center
+    for (const c of cells) {
+      const dx = W / 2 - c.x;
+      const dy = H / 2 - c.y;
+      const dist = Math.sqrt(dx * dx + dy * dy);
+      if (dist > 50) {
+        c.x += dx * 0.001;
+        c.y += dy * 0.001;
+      }
+    }
+
+    // Draw bonds
+    drawBonds();
+
+    // Draw cells back-to-front (older first)
+    for (const c of cells) c.draw();
+
+    // Colony label
+    ctx.fillStyle = `hsla(220, 40%, 45%, ${0.3 + 0.1 * Math.sin(time * 1.5)})`;
+    ctx.font = '11px Courier New';
+    ctx.textAlign = 'center';
+    ctx.fillText(`colony: ${cells.length} cell${cells.length > 1 ? 's' : ''} / generation ${Math.max(...cells.map(c => c.generation))}`, W / 2, H - 20);
+
+    requestAnimationFrame(draw);
+  }
+
+  ctx.fillStyle = '#06060f';
+  ctx.fillRect(0, 0, W, H);
+  draw();
+})();
+</script>
+</body>
+</html>

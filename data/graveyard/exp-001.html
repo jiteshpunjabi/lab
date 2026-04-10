@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Mouse Reactive Particle Field</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.9.0/p5.min.js"></script>
+    <style>
+        body { margin: 0; overflow: hidden; background-color: #000000; }
+    </style>
+</head>
+<body><script>
+let particles = [];
+const NUM_PARTICLES = 150;
+const MAX_SPEED = 3;
+const REPULSION_DISTANCE = 100;
+const STRENGTH = 0.5;
+
+class Particle {
+    constructor(x, y) {
+        this.position = createVector(x, y);
+        this.velocity = p5.Vector.random2D().mult(random(1, 3));
+        this.acceleration = createVector(0, 0);
+        this.radius = random(1, 3);
+        this.lifespan = 255;
+    }
+
+    applyForce(force) {
+        this.acceleration.add(force);
+    }
+
+    update() {
+        this.velocity.add(this.acceleration);
+        this.velocity.limit(MAX_SPEED);
+        this.position.add(this.velocity);
+        this.acceleration.mult(0); // Reset acceleration
+        this.lifespan -= 0.5;
+    }
+
+    show() {
+        let alpha = map(this.lifespan, 0, 255, 0, 255);
+        stroke(100, 150, 255, alpha);
+        strokeWeight(this.radius);
+        point(this.position.x, this.position.y);
+    }
+}
+
+function setup() {
+    createCanvas(windowWidth, windowHeight);
+    particles = [];
+    for (let i = 0; i < NUM_PARTICLES; i++) {
+        particles.push(new Particle(random(width), random(height)));
+    }
+}
+
+function draw() {
+    // Fading background effect
+    background(0, 0, 0, 50); 
+
+    let mousePos = createVector(mouseX, mouseY);
+    
+    for (let i = 0; i < particles.length; i++) {
+        let p = particles[i];
+        
+        // 1. Mouse Repulsion Force
+        let attractionForce = p5.Vector.sub(p.position, mousePos);
+        let distance = p5.dist(p.position.x, p.position.y, mousePos.x, mousePos.y);
+        
+        if (distance < REPULSION_DISTANCE) {
+            // Calculate force proportional to proximity and inversely related to distance squared (for strong push)
+            let forceMagnitude = STRENGTH * (REPULSION_DISTANCE - distance) / REPULSION_DISTANCE;
+            attractionForce.normalize();
+            attractionForce.mult(forceMagnitude);
+            p.applyForce(attractionForce);
+        }
+
+        // 2. Natural damping/cohesion (very slight force towards center)
+        let centerForce = p5.Vector.sub(createVector(width/2, height/2), p.position);
+        centerForce.setMag(0.01);
+        p.applyForce(centerForce);
+        
+        p.update();
+        p.show();
+    }
+}
+
+function windowResized() {
+    resizeCanvas(windowWidth, windowHeight);
+}
+</script></body></html>

@@ -1,0 +1,374 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>exp-040 — Erosion</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { background: #0a0a0f; overflow: hidden; }
+canvas { display: block; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<script>
+(() => {
+  const canvas = document.getElementById('c');
+  const ctx = canvas.getContext('2d');
+  const W = canvas.width = 1280;
+  const H = canvas.height = 720;
+
+  const COLS = 80;
+  const ROWS = 80;
+  const N = COLS * ROWS;
+  const height = new Float32Array(N);
+  const sediment = new Float32Array(N);
+  const moisture = new Float32Array(N);
+  const hardness = new Float32Array(N);
+
+  function idx(x, y) { return y * COLS + x; }
+
+  // Better noise
+  function hash(x, y) {
+    let n = (x | 0) * 374761393 + (y | 0) * 668265263;
+    n = (n ^ (n >> 13)) * 1274126177;
+    return ((n ^ (n >> 16)) & 0x7fffffff) / 0x7fffffff;
+  }
+
+  function smoothNoise(x, y) {
+    const ix = Math.floor(x), iy = Math.floor(y);
+    const fx = x - ix, fy = y - iy;
+    const sx = fx * fx * (3 - 2 * fx), sy = fy * fy * (3 - 2 * fy);
+    const a = hash(ix, iy), b = hash(ix + 1, iy);
+    const c = hash(ix, iy + 1), d = hash(ix + 1, iy + 1);
+    return a + (b - a) * sx + (c - a) * sy + (a - b - c + d) * sx * sy;
+  }
+
+  function fbm(x, y, oct) {
+    let v = 0, a = 1, f = 1, m = 0;
+    for (let i = 0; i < oct; i++) {
+      v += a * smoothNoise(x * f, y * f);
+      m += a; a *= 0.5; f *= 2.03;
+    }
+    return v / m;
+  }
+
+  function initTerrain() {
+    for (let y = 0; y < ROWS; y++) {
+      for (let x = 0; x < COLS; x++) {
+        const i = idx(x, y);
+        const nx = x / COLS, ny = y / ROWS;
+
+        // Base terrain — generous height
+        let h = fbm(nx * 4.5 + 0.3, ny * 4.5 + 0.7, 7);
+
+        // Sharp ridges
+        const r1 = Math.abs(fbm(nx * 3.5 + 3.1, ny * 3.5 + 1.7, 5) * 2 - 1);
+        h = h * 0.5 + (1 - r1) * (1 - r1) * 0.5;
+
+        // Gentle dome shape — not aggressive falloff
+        const cx = (nx - 0.5) * 2;
+        const cy = (ny - 0.5) * 2;
+        const d = cx * cx + cy * cy;
+        const mask = Math.max(0, 1 - d * 0.8);
+        h *= mask;
+
+        // Boost overall height
+        h = Math.pow(h, 0.8) * 1.2;
+        h = Math.min(1, h);
+
+        height[i] = h;
+        sediment[i] = 0;
+        moisture[i] = 0;
+        hardness[i] = 0.2 + fbm(nx * 10 + 10, ny * 10 + 10, 3) * 0.8;
+      }
+    }
+  }
+
+  // Hydraulic erosion
+  function erode() {
+    let px = Math.random() * (COLS - 4) + 2;
+    let py = Math.random() * (ROWS - 4) + 2;
+    let dx = 0, dy = 0;
+    let speed = 0.5;
+    let water = 1;
+    let carry = 0;
+
+    const trail = [];
+
+    for (let step = 0; step < 80; step++) {
+      const ix = Math.floor(px), iy = Math.floor(py);
+      if (ix < 2 || ix >= COLS - 2 || iy < 2 || iy >= ROWS - 2) break;
+
+      const i = idx(ix, iy);
+      const gx = (height[idx(ix + 1, iy)] - height[idx(ix - 1, iy)]) * 0.5;
+      const gy = (height[idx(ix, iy + 1)] - height[idx(ix, iy - 1)]) * 0.5;
+
+      dx = dx * 0.35 - gx * 0.65;
+      dy = dy * 0.35 - gy * 0.65;
+
+      const len = Math.sqrt(dx * dx + dy * dy);
+      if (len < 0.0001) { dx = Math.random() - 0.5; dy = Math.random() - 0.5; continue; }
+      dx /= len; dy /= len;
+
+      const npx = px + dx, npy = py + dy;
+      const nix = Math.floor(npx), niy = Math.floor(npy);
+      if (nix < 1 || nix >= COLS - 1 || niy < 1 || niy >= ROWS - 1) break;
+
+      const hDiff = height[idx(nix, niy)] - height[i];
+      const cap = Math.max(-hDiff * 5, 0.01) * speed * water;
+
+      if (carry > cap || hDiff > 0) {
+        const dep = hDiff > 0 ? Math.min(hDiff, carry) : (carry - cap) * 0.03;
+        carry -= dep;
+        height[i] += dep;
+        sediment[i] += dep * 0.4;
+      } else {
+        const erAmt = Math.min((cap - carry) * 0.05, -hDiff * 0.5) * (1 - hardness[i] * 0.7);
+        if (erAmt > 0) {
+          carry += erAmt;
+          height[i] -= erAmt;
+          height[idx(ix - 1, iy)] -= erAmt * 0.08;
+          height[idx(ix + 1, iy)] -= erAmt * 0.08;
+          height[idx(ix, iy - 1)] -= erAmt * 0.08;
+          height[idx(ix, iy + 1)] -= erAmt * 0.08;
+        }
+      }
+
+      moisture[i] = Math.min(1, moisture[i] + 0.2);
+      speed = Math.sqrt(Math.max(0.01, speed * speed + hDiff * 6));
+      water *= 0.99;
+
+      trail.push(px, py);
+      px = npx; py = npy;
+      if (water < 0.01) break;
+    }
+    return trail;
+  }
+
+  // Color — warm geological palette
+  function getColor(h, moist, sed) {
+    h = Math.max(0, Math.min(1, h));
+
+    // Warm palette from canyon to snow
+    let r, g, b;
+    if (h < 0.15) {
+      const t = h / 0.15;
+      r = 30 + t * 40; g = 20 + t * 25; b = 15 + t * 15;
+    } else if (h < 0.3) {
+      const t = (h - 0.15) / 0.15;
+      r = 70 + t * 50; g = 45 + t * 35; b = 30 + t * 15;
+    } else if (h < 0.5) {
+      const t = (h - 0.3) / 0.2;
+      r = 120 + t * 30; g = 80 + t * 40; b = 45 + t * 20;
+    } else if (h < 0.7) {
+      const t = (h - 0.5) / 0.2;
+      r = 150 - t * 30; g = 120 + t * 20; b = 65 + t * 15;
+    } else if (h < 0.85) {
+      const t = (h - 0.7) / 0.15;
+      r = 120 + t * 60; g = 140 + t * 30; b = 80 + t * 50;
+    } else {
+      const t = (h - 0.85) / 0.15;
+      r = 180 + t * 40; g = 170 + t * 40; b = 130 + t * 60;
+    }
+
+    // Moisture — blue tint in valleys
+    if (moist > 0.05) {
+      const m = Math.min(moist, 1) * 0.3;
+      r *= (1 - m * 0.3);
+      g *= (1 + m * 0.1);
+      b += m * 45;
+    }
+
+    // Sediment — ochre in deposits
+    if (sed > 0.01) {
+      const s = Math.min(sed * 3, 1) * 0.2;
+      r = r * (1 - s) + 200 * s;
+      g = g * (1 - s) + 160 * s;
+      b = b * (1 - s) + 80 * s;
+    }
+
+    return [r, g, b];
+  }
+
+  // Projection — oblique view
+  const CELL = 11;
+  const H_SCALE = 220;
+  let viewRot = 0.4; // start at nice angle
+
+  function project(gx, gy, gz) {
+    const cx = gx - COLS / 2;
+    const cy = gy - ROWS / 2;
+    const cr = Math.cos(viewRot), sr = Math.sin(viewRot);
+    const rx = cx * cr - cy * sr;
+    const ry = cx * sr + cy * cr;
+
+    return [
+      W / 2 + rx * CELL,
+      H * 0.72 + ry * CELL * 0.45 - gz * H_SCALE
+    ];
+  }
+
+  function render() {
+    ctx.fillStyle = '#0a0a0f';
+    ctx.fillRect(0, 0, W, H);
+
+    // Subtle sky gradient
+    const skyGrad = ctx.createLinearGradient(0, 0, 0, H * 0.5);
+    skyGrad.addColorStop(0, 'rgba(15, 12, 25, 1)');
+    skyGrad.addColorStop(1, 'rgba(10, 10, 15, 0)');
+    ctx.fillStyle = skyGrad;
+    ctx.fillRect(0, 0, W, H * 0.5);
+
+    const cr = Math.cos(viewRot), sr = Math.sin(viewRot);
+
+    // Sort order for painter's algorithm
+    const xs = sr >= 0 ? 1 : -1;
+    const ys = cr >= 0 ? 1 : -1;
+    const xFrom = xs > 0 ? 0 : COLS - 2;
+    const xTo = xs > 0 ? COLS - 1 : -1;
+    const yFrom = ys > 0 ? 0 : ROWS - 2;
+    const yTo = ys > 0 ? ROWS - 1 : -1;
+
+    for (let gy = yFrom; gy !== yTo; gy += ys) {
+      for (let gx = xFrom; gx !== xTo; gx += xs) {
+        const i = idx(gx, gy);
+        const h = height[i];
+        if (h < 0.008) continue;
+
+        const h10 = height[idx(gx + 1, gy)];
+        const h01 = height[idx(gx, gy + 1)];
+        const h11 = height[idx(gx + 1, gy + 1)];
+
+        // Normal for lighting
+        const lx = (gx > 0 ? height[idx(gx - 1, gy)] : h);
+        const ly = (gy > 0 ? height[idx(gx, gy - 1)] : h);
+        const nx = h10 - lx;
+        const ny = h01 - ly;
+        const light = 0.6 + nx * 5.0 - ny * 3.5;
+        const lit = Math.max(0.3, Math.min(1.5, light));
+
+        const [cr2, cg, cb] = getColor(h, moisture[i], sediment[i]);
+
+        // Top face
+        const p0 = project(gx, gy, h);
+        const p1 = project(gx + 1, gy, h10);
+        const p2 = project(gx + 1, gy + 1, h11);
+        const p3 = project(gx, gy + 1, h01);
+
+        ctx.beginPath();
+        ctx.moveTo(p0[0], p0[1]);
+        ctx.lineTo(p1[0], p1[1]);
+        ctx.lineTo(p2[0], p2[1]);
+        ctx.lineTo(p3[0], p3[1]);
+        ctx.closePath();
+        const fr = Math.max(0, Math.min(255, cr2 * lit)) | 0;
+        const fg = Math.max(0, Math.min(255, cg * lit)) | 0;
+        const fb = Math.max(0, Math.min(255, cb * lit)) | 0;
+        ctx.fillStyle = `rgb(${fr},${fg},${fb})`;
+        ctx.fill();
+
+        // Front face (cliff wall) — only for visible edges
+        if (h > 0.02) {
+          const b3 = project(gx, gy + 1, 0);
+          const b2 = project(gx + 1, gy + 1, 0);
+          ctx.beginPath();
+          ctx.moveTo(p3[0], p3[1]);
+          ctx.lineTo(p2[0], p2[1]);
+          ctx.lineTo(b2[0], b2[1]);
+          ctx.lineTo(b3[0], b3[1]);
+          ctx.closePath();
+          // Strata bands on cliff face
+          const avgH = (h01 + h11) * 0.5;
+          const [sr2, sg, sb] = getColor(avgH * 0.5, 0, 0);
+          ctx.fillStyle = `rgb(${(sr2 * 0.35) | 0},${(sg * 0.35) | 0},${(sb * 0.35) | 0})`;
+          ctx.fill();
+        }
+
+        // Right face
+        if (h > 0.02) {
+          const br1 = project(gx + 1, gy, 0);
+          const br2 = project(gx + 1, gy + 1, 0);
+          ctx.beginPath();
+          ctx.moveTo(p1[0], p1[1]);
+          ctx.lineTo(p2[0], p2[1]);
+          ctx.lineTo(br2[0], br2[1]);
+          ctx.lineTo(br1[0], br1[1]);
+          ctx.closePath();
+          const [rr, rg, rb] = getColor(h * 0.6, 0, 0);
+          ctx.fillStyle = `rgb(${(rr * 0.25) | 0},${(rg * 0.25) | 0},${(rb * 0.25) | 0})`;
+          ctx.fill();
+        }
+      }
+    }
+
+    // Water streams — draw active moisture as glowing blue lines
+    ctx.globalAlpha = 0.4;
+    ctx.strokeStyle = 'rgba(80, 130, 200, 0.5)';
+    ctx.lineWidth = 1;
+    for (let gy = 1; gy < ROWS - 1; gy++) {
+      for (let gx = 1; gx < COLS - 1; gx++) {
+        const i = idx(gx, gy);
+        if (moisture[i] > 0.3) {
+          const p = project(gx, gy, height[i] + 0.003);
+          // Find downhill neighbor
+          let minH = height[i], minX = gx, minY = gy;
+          for (let dy = -1; dy <= 1; dy++) {
+            for (let dx = -1; dx <= 1; dx++) {
+              const ni = idx(gx + dx, gy + dy);
+              if (height[ni] < minH) { minH = height[ni]; minX = gx + dx; minY = gy + dy; }
+            }
+          }
+          if (minX !== gx || minY !== gy) {
+            const p2 = project(minX, minY, minH + 0.003);
+            ctx.globalAlpha = Math.min(0.5, moisture[i] * 0.6);
+            ctx.beginPath();
+            ctx.moveTo(p[0], p[1]);
+            ctx.lineTo(p2[0], p2[1]);
+            ctx.stroke();
+          }
+        }
+      }
+    }
+    ctx.globalAlpha = 1;
+
+    // Title
+    ctx.fillStyle = 'rgba(180, 170, 150, 0.12)';
+    ctx.font = '11px monospace';
+    ctx.fillText('erosion', 20, H - 20);
+  }
+
+  let time = 0;
+
+  function update() {
+    time++;
+
+    for (let i = 0; i < 4; i++) erode();
+
+    // Weather bursts
+    if (time % 180 === 0) {
+      for (let i = 0; i < 40; i++) erode();
+    }
+
+    // Decay moisture
+    if (time % 4 === 0) {
+      for (let i = 0; i < N; i++) {
+        moisture[i] *= 0.94;
+      }
+    }
+
+    // Very slow rotation
+    viewRot += 0.00025;
+
+    render();
+    requestAnimationFrame(update);
+  }
+
+  initTerrain();
+  for (let i = 0; i < 600; i++) erode();
+  update();
+})();
+</script>
+</body>
+</html>

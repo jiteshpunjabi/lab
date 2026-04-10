@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Evolving Energy Field</title>
+    <style>
+        body { margin: 0; overflow: hidden; background-color: #000011; }
+        canvas { display: block; width: 100vw; height: 100vh; }
+    </style>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.9.0/p5.min.js"></script>
+</head>
+<body>
+    <script>
+        let particles = [];
+        const NUM_PARTICLES = 150;
+        const GRAVITY = 0.005;
+        const COULOMB_CONSTANT = 0.01;
+
+        // Particle class to manage position, velocity, and history for drawing lines
+        class Particle {
+            constructor(x, y) {
+                this.pos = createVector(x, y);
+                this.vel = p5.Vector.random2D().mult(random(1, 2));
+                this.acc = createVector(0, 0);
+                this.history = [];
+                this.maxHistory = 20;
+                this.alive = true;
+            }
+
+            applyForce(force) {
+                this.acc.add(force);
+            }
+
+            update() {
+                // Apply simulated forces (like gravity or field attraction)
+                this.applyForce(createVector(0, GRAVITY));
+                
+                // Update position and velocity
+                this.vel.add(this.acc);
+                this.vel.limit(3); // Keep speed manageable
+                this.pos.add(this.vel);
+                this.acc.mult(0); // Reset acceleration
+                
+                // Manage history trail
+                this.history.push(this.pos.copy());
+                if (this.history.length > this.maxHistory) {
+                    this.history.shift();
+                }
+            }
+
+            display() {
+                // Draw the trail by connecting points
+                noFill();
+                stroke(0, 150, 255, 150); // Blueish, semi-transparent
+                strokeWeight(1.5);
+                beginShape();
+                for (let i = 0; i < this.history.length; i++) {
+                    let p = this.history[i];
+                    // Make the color/alpha fade as the particle moves further back in time
+                    let alpha = map(i, 0, this.history.length - 1, 0, 150);
+                    stroke(0, 150, 255, alpha);
+                    vertex(p.x, p.y);
+                }
+                endShape();
+            }
+        }
+
+        function setup() {
+            createCanvas(windowWidth, windowHeight);
+            // Initialize particles spread across the screen
+            for (let i = 0; i < NUM_PARTICLES; i++) {
+                let x = random(width);
+                let y = random(height);
+                particles.push(new Particle(x, y));
+            }
+        }
+
+        function draw() {
+            // Fading background overlay for a motion blur/time accumulation effect
+            background(0, 10, 16, 30); 
+
+            // 1. Apply inter-particle repulsion (Electrostatic Force analogue)
+            for (let i = 0; i < particles.length; i++) {
+                let p1 = particles[i];
+                let totalForce = createVector(0, 0);
+
+                // Interaction with all other particles
+                for (let j = 0; j < particles.length; j++) {
+                    if (i === j) continue;
+                    let p2 = particles[j];
+
+                    // Vector pointing from p1 to p2
+                    let forceVector = p2.pos.minus(p1.pos);
+                    let distance = p2.pos.dist(p1.pos);
+                    
+                    // Calculate force: Inverse square repulsion, scaled by distance (to prevent blowup)
+                    let force = (COULOMB_CONSTANT * p1.pos.mag() * p2.pos.mag()) / (distance * distance + 100);
+                    forceVector.normalize();
+                    forceVector.mult(force);
+
+                    totalForce.add(forceVector);
+                }
+                p1.applyForce(totalForce);
+            }
+
+            // 2. Update and Display
+            for (let i = 0; i < particles.length; i++) {
+                let p = particles[i];
+                p.update();
+                p.display();
+            }
+        }
+
+        function windowResized() {
+            resizeCanvas(windowWidth, windowHeight);
+        }
+    </script>
+</body>
+</html>

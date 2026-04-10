@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>exp-006 — Chromatic Tessellation</title>
+<style>
+  * { margin: 0; padding: 0; }
+  body { overflow: hidden; background: #000; }
+  canvas { display: block; width: 100vw; height: 100vh; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<script>
+const canvas = document.getElementById('c');
+const gl = canvas.getContext('webgl');
+
+function resize() {
+  canvas.width = window.innerWidth;
+  canvas.height = window.innerHeight;
+  gl.viewport(0, 0, canvas.width, canvas.height);
+}
+window.addEventListener('resize', resize);
+resize();
+
+// Vertex shader — fullscreen quad
+const vsSource = `
+attribute vec2 a_position;
+void main() {
+  gl_Position = vec4(a_position, 0.0, 1.0);
+}`;
+
+// Fragment shader — trigonometric stained-glass tessellation
+const fsSource = `
+precision highp float;
+uniform float u_time;
+uniform vec2 u_resolution;
+uniform vec2 u_mouse;
+
+vec3 hsv2rgb(float h, float s, float v) {
+  vec3 c = vec3(h * 6.0, s, v);
+  vec3 rgb = clamp(abs(mod(c.x + vec3(0.0, 4.0, 2.0), 6.0) - 3.0) - 1.0, 0.0, 1.0);
+  return v * mix(vec3(1.0), rgb, s);
+}
+
+void main() {
+  vec2 uv = gl_FragCoord.xy / u_resolution;
+  vec2 p = (gl_FragCoord.xy - 0.5 * u_resolution) / min(u_resolution.x, u_resolution.y);
+
+  // Mouse influence (defaults to center)
+  vec2 m = (u_mouse - 0.5 * u_resolution) / min(u_resolution.x, u_resolution.y);
+  float md = length(p - m);
+
+  float t = u_time * 0.4;
+
+  // Tessellation: overlapping sine grids at different angles
+  float s1 = sin(p.x * 8.0 + t) * cos(p.y * 8.0 - t * 0.7);
+  float s2 = sin((p.x * 0.866 + p.y * 0.5) * 10.0 + t * 1.3) *
+             cos((p.x * 0.5 - p.y * 0.866) * 10.0 - t * 0.9);
+  float s3 = sin(length(p) * 12.0 - t * 2.0) * 0.5;
+
+  // Combine into cell-like pattern
+  float cell = s1 + s2 + s3;
+  float edge = 1.0 - smoothstep(0.0, 0.15, abs(cell));
+
+  // Color: hue rotates with position, time, and mouse distance
+  float hue = fract(atan(p.y, p.x) / 6.2832 + t * 0.1 + md * 0.3);
+  float sat = 0.7 + 0.3 * sin(cell * 3.14);
+  float val = 0.4 + 0.5 * (0.5 + 0.5 * sin(cell * 2.0 + t));
+
+  vec3 color = hsv2rgb(hue, sat, val);
+
+  // Bright edges like leaded glass
+  color = mix(color, vec3(1.0, 0.95, 0.8), edge * 0.7);
+
+  // Radial glow from mouse
+  float glow = exp(-md * 3.0) * 0.3;
+  color += vec3(glow, glow * 0.6, glow * 0.2);
+
+  // Ensure nothing is too dark
+  color = max(color, vec3(0.08, 0.05, 0.1));
+
+  gl_FragColor = vec4(color, 1.0);
+}`;
+
+function compileShader(src, type) {
+  const s = gl.createShader(type);
+  gl.shaderSource(s, src);
+  gl.compileShader(s);
+  if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) {
+    console.error(gl.getShaderInfoLog(s));
+    return null;
+  }
+  return s;
+}
+
+const vs = compileShader(vsSource, gl.VERTEX_SHADER);
+const fs = compileShader(fsSource, gl.FRAGMENT_SHADER);
+const prog = gl.createProgram();
+gl.attachShader(prog, vs);
+gl.attachShader(prog, fs);
+gl.linkProgram(prog);
+gl.useProgram(prog);
+
+// Fullscreen quad
+const buf = gl.createBuffer();
+gl.bindBuffer(gl.ARRAY_BUFFER, buf);
+gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([
+  -1, -1, 1, -1, -1, 1,
+  -1, 1, 1, -1, 1, 1
+]), gl.STATIC_DRAW);
+
+const aPos = gl.getAttribLocation(prog, 'a_position');
+gl.enableVertexAttribArray(aPos);
+gl.vertexAttribPointer(aPos, 2, gl.FLOAT, false, 0, 0);
+
+const uTime = gl.getUniformLocation(prog, 'u_time');
+const uRes = gl.getUniformLocation(prog, 'u_resolution');
+const uMouse = gl.getUniformLocation(prog, 'u_mouse');
+
+let mx = canvas.width / 2, my = canvas.height / 2;
+canvas.addEventListener('mousemove', e => {
+  mx = e.clientX;
+  my = canvas.height - e.clientY; // flip Y for GL coords
+});
+
+function frame(t) {
+  gl.uniform1f(uTime, t * 0.001);
+  gl.uniform2f(uRes, canvas.width, canvas.height);
+  gl.uniform2f(uMouse, mx, my);
+  gl.drawArrays(gl.TRIANGLES, 0, 6);
+  requestAnimationFrame(frame);
+}
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>

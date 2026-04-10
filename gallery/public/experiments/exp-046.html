@@ -1,0 +1,430 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=1280,height=720">
+<title>exp-046 — Resonant Decay</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    width: 1280px; height: 720px; overflow: hidden;
+    background: #06050c;
+    font-family: 'Courier New', monospace;
+    cursor: crosshair;
+  }
+  .cell {
+    position: absolute;
+    border: none;
+    outline: none;
+    font-family: 'Courier New', monospace;
+    pointer-events: none;
+    -webkit-appearance: none;
+    appearance: none;
+  }
+  #glow {
+    position: fixed; top: 0; left: 0;
+    width: 100%; height: 100%;
+    pointer-events: none; z-index: 999;
+    mix-blend-mode: screen;
+    background: radial-gradient(circle 200px at var(--mx, 640px) var(--my, 360px),
+      rgba(180, 140, 255, 0.15), transparent);
+  }
+  svg {
+    position: fixed; top: 0; left: 0;
+    width: 100%; height: 100%;
+    pointer-events: none; z-index: 998;
+  }
+</style>
+</head>
+<body>
+<svg id="archLayer" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 720"></svg>
+<div id="glow"></div>
+<script>
+(function() {
+  const W = 1280, H = 720;
+  const COLS = 32, ROWS = 18;
+  const CELL_W = W / COLS, CELL_H = H / ROWS;
+  const TOTAL = COLS * ROWS;
+
+  let mx = W / 2, my = H / 2;
+  let time = 0;
+
+  // Audio
+  let audioCtx = null;
+  const SCALE = [130.81, 164.81, 196.00, 220.00, 261.63, 329.63, 392.00, 440.00];
+
+  function ensureAudio() {
+    if (!audioCtx) {
+      audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    }
+    return audioCtx;
+  }
+
+  // Sound sources for wave interference
+  const sources = [];
+
+  function emitSource(x, y) {
+    const ctx = ensureAudio();
+    const freq = SCALE[Math.floor(Math.random() * SCALE.length)];
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.type = 'sine';
+    osc.frequency.value = freq;
+    gain.gain.setValueAtTime(0.08, ctx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 3);
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+    osc.start();
+    osc.stop(ctx.currentTime + 3);
+
+    // Harmonic
+    const osc2 = ctx.createOscillator();
+    const gain2 = ctx.createGain();
+    osc2.type = 'sine';
+    osc2.frequency.value = freq * 2;
+    gain2.gain.setValueAtTime(0.03, ctx.currentTime);
+    gain2.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 2);
+    osc2.connect(gain2);
+    gain2.connect(ctx.destination);
+    osc2.start();
+    osc2.stop(ctx.currentTime + 2);
+
+    if (sources.length >= 8) sources.shift();
+    sources.push({
+      x, y, freq, birth: time, life: 10,
+      hue: (freq / 440) * 260 + 200
+    });
+  }
+
+  // Wave interference at a point
+  function waveAt(px, py, t) {
+    let val = 0;
+    for (const src of sources) {
+      const age = t - src.birth;
+      if (age > src.life) continue;
+      const decay = 1 - age / src.life;
+      const dx = px - src.x;
+      const dy = py - src.y;
+      const dist = Math.sqrt(dx * dx + dy * dy);
+      const wavelength = 600 / (src.freq / 130);
+      const phase = (dist / wavelength) * Math.PI * 2 - t * 0.5;
+      val += Math.sin(phase) * decay / (1 + dist * 0.004);
+    }
+    return val;
+  }
+
+  // DOM elements
+  const elTypes = ['button', 'input', 'div', 'span', 'select', 'progress', 'meter'];
+  const inputTypes = ['text', 'range', 'checkbox', 'radio', 'color'];
+  const glyphs = [
+    '\u2588', '\u2593', '\u2592', '\u2591',
+    '\u25CF', '\u25CB', '\u25A0', '\u25A1',
+    '\u2605', '\u2606', '\u2737', '\u273B',
+    '\u25B2', '\u25BC', '\u25C0', '\u25B6',
+    '\u2302', '\u2318', '\u2620', '\u263A',
+  ];
+
+  const cells = [];
+  const frag = document.createDocumentFragment();
+
+  for (let i = 0; i < TOTAL; i++) {
+    const col = i % COLS;
+    const row = Math.floor(i / COLS);
+    const typeIdx = (col * 7 + row * 13 + i * 3) % elTypes.length;
+    const tag = elTypes[typeIdx];
+    const el = document.createElement(tag);
+    el.className = 'cell';
+
+    if (tag === 'input') {
+      el.type = inputTypes[(col + row) % inputTypes.length];
+      if (el.type === 'range') el.value = Math.random() * 100;
+    }
+    if (tag === 'button' || tag === 'span' || tag === 'div') {
+      el.textContent = glyphs[i % glyphs.length];
+    }
+    if (tag === 'progress') { el.max = 100; el.value = (i * 7) % 100; }
+    if (tag === 'meter') { el.min = 0; el.max = 100; el.value = (i * 11) % 100; }
+    if (tag === 'select') {
+      const opt = document.createElement('option');
+      opt.textContent = glyphs[(i + 4) % glyphs.length];
+      el.appendChild(opt);
+    }
+
+    const homeX = col * CELL_W;
+    const homeY = row * CELL_H;
+
+    cells.push({
+      el, homeX, homeY,
+      x: homeX, y: homeY,
+      vx: 0, vy: 0,
+      angle: 0, scale: 1,
+      hue: 0, sat: 80, light: 45,
+      opacity: 1,
+      col, row, idx: i, tag,
+      w: CELL_W - 1, h: CELL_H - 1,
+      freq: 0.5 + Math.random() * 2,
+      phaseOff: Math.random() * Math.PI * 2,
+    });
+
+    frag.appendChild(el);
+  }
+  document.body.appendChild(frag);
+
+  // SVG arch layer
+  const svgEl = document.getElementById('archLayer');
+  const ns = 'http://www.w3.org/2000/svg';
+
+  // Create SVG defs
+  const defs = document.createElementNS(ns, 'defs');
+  const filter = document.createElementNS(ns, 'filter');
+  filter.id = 'archGlow';
+  filter.setAttribute('x', '-50%'); filter.setAttribute('y', '-50%');
+  filter.setAttribute('width', '200%'); filter.setAttribute('height', '200%');
+  const blur = document.createElementNS(ns, 'feGaussianBlur');
+  blur.setAttribute('stdDeviation', '5');
+  blur.setAttribute('result', 'blur');
+  const merge = document.createElementNS(ns, 'feMerge');
+  const mn1 = document.createElementNS(ns, 'feMergeNode');
+  mn1.setAttribute('in', 'blur');
+  const mn2 = document.createElementNS(ns, 'feMergeNode');
+  mn2.setAttribute('in', 'SourceGraphic');
+  merge.appendChild(mn1); merge.appendChild(mn2);
+  filter.appendChild(blur); filter.appendChild(merge);
+  defs.appendChild(filter);
+  svgEl.appendChild(defs);
+
+  const archGroup = document.createElementNS(ns, 'g');
+  svgEl.appendChild(archGroup);
+
+  // Mouse events
+  document.addEventListener('mousemove', (e) => {
+    mx = e.clientX; my = e.clientY;
+    document.body.style.setProperty('--mx', mx + 'px');
+    document.body.style.setProperty('--my', my + 'px');
+  });
+
+  document.addEventListener('click', (e) => {
+    emitSource(e.clientX, e.clientY);
+  });
+
+  // Auto-emit initial sources (pillar positions along a nave)
+  function autoEmit() {
+    const positions = [
+      [W * 0.12, H * 0.55], [W * 0.88, H * 0.55],
+      [W * 0.28, H * 0.4], [W * 0.72, H * 0.4],
+      [W * 0.5, H * 0.2],
+    ];
+    for (const [px, py] of positions) {
+      emitSource(px, py);
+    }
+  }
+
+  setTimeout(autoEmit, 300);
+
+  // Periodically re-emit
+  setInterval(() => {
+    if (sources.filter(s => time - s.birth < s.life).length < 3) {
+      const x = W * 0.15 + Math.random() * W * 0.7;
+      const y = H * 0.2 + Math.random() * H * 0.4;
+      emitSource(x, y);
+    }
+  }, 6000);
+
+  function renderArches() {
+    while (archGroup.firstChild) archGroup.removeChild(archGroup.firstChild);
+
+    const liveSources = sources.filter(s => time - s.birth < s.life);
+
+    for (let i = 0; i < liveSources.length; i++) {
+      const s1 = liveSources[i];
+      const decay1 = Math.max(0, 1 - (time - s1.birth) / s1.life);
+
+      // Glow at source
+      const glow = document.createElementNS(ns, 'circle');
+      glow.setAttribute('cx', s1.x);
+      glow.setAttribute('cy', s1.y);
+      glow.setAttribute('r', 25 + Math.sin(time * 2 + i) * 5);
+      glow.setAttribute('fill', `hsla(${s1.hue}, 50%, 55%, ${decay1 * 0.12})`);
+      glow.setAttribute('filter', 'url(#archGlow)');
+      archGroup.appendChild(glow);
+
+      // Wave rings
+      const ringAge = ((time - s1.birth) * 2) % 3;
+      for (let r = 0; r < 2; r++) {
+        const ringR = ((ringAge + r) / 3) * 180;
+        const ringOpacity = (1 - ringR / 180) * decay1 * 0.08;
+        if (ringOpacity > 0.005) {
+          const ring = document.createElementNS(ns, 'circle');
+          ring.setAttribute('cx', s1.x);
+          ring.setAttribute('cy', s1.y);
+          ring.setAttribute('r', ringR);
+          ring.setAttribute('fill', 'none');
+          ring.setAttribute('stroke', `hsla(${s1.hue}, 35%, 50%, ${ringOpacity})`);
+          ring.setAttribute('stroke-width', '0.8');
+          archGroup.appendChild(ring);
+        }
+      }
+
+      // Arches between sources
+      for (let j = i + 1; j < liveSources.length; j++) {
+        const s2 = liveSources[j];
+        const decay2 = Math.max(0, 1 - (time - s2.birth) / s2.life);
+        const dist = Math.sqrt((s1.x - s2.x) ** 2 + (s1.y - s2.y) ** 2);
+
+        if (dist < W * 0.55 && dist > 60) {
+          const archOpacity = Math.min(decay1, decay2) * (1 - dist / (W * 0.55)) * 0.4;
+          const hue = (s1.hue + s2.hue) / 2;
+          const archH = Math.max(50, (1 - dist / (W * 0.55)) * 160);
+
+          const mx = (s1.x + s2.x) / 2;
+          const my = (s1.y + s2.y) / 2;
+          const span = Math.abs(s2.x - s1.x);
+          const archTop = Math.min(s1.y, s2.y) - archH;
+
+          const path = document.createElementNS(ns, 'path');
+          const d = `M ${s1.x} ${s1.y} C ${s1.x + span * 0.1} ${archTop - archH * 0.3}, ${mx - span * 0.05} ${archTop}, ${mx} ${archTop} C ${mx + span * 0.05} ${archTop}, ${s2.x - span * 0.1} ${archTop - archH * 0.3}, ${s2.x} ${s2.y}`;
+          path.setAttribute('d', d);
+          path.setAttribute('fill', 'none');
+          path.setAttribute('stroke', `hsla(${hue}, 40%, 50%, ${archOpacity})`);
+          path.setAttribute('stroke-width', '1.5');
+          path.setAttribute('filter', 'url(#archGlow)');
+          archGroup.appendChild(path);
+        }
+      }
+    }
+
+    // Rose window at top center
+    if (liveSources.length >= 3) {
+      const totalDecay = liveSources.reduce((s, src) => s + Math.max(0, 1 - (time - src.birth) / src.life), 0) / liveSources.length;
+      const cx = W / 2, cy = H * 0.08;
+      const roseR = 50 + totalDecay * 30;
+      const segments = Math.max(6, liveSources.length * 2);
+
+      for (let i = 0; i < segments; i++) {
+        const a1 = (i / segments) * Math.PI * 2;
+        const a2 = ((i + 0.5) / segments) * Math.PI * 2;
+        const a3 = ((i + 1) / segments) * Math.PI * 2;
+        const r1 = roseR * (0.7 + Math.sin(time + i * 0.8) * 0.15);
+        const r2 = roseR * 0.4;
+        const x1 = cx + Math.cos(a1) * r1;
+        const y1 = cy + Math.sin(a1) * r1;
+        const x2 = cx + Math.cos(a2) * r2;
+        const y2 = cy + Math.sin(a2) * r2;
+        const x3 = cx + Math.cos(a3) * r1;
+        const y3 = cy + Math.sin(a3) * r1;
+
+        const petal = document.createElementNS(ns, 'path');
+        petal.setAttribute('d', `M ${cx} ${cy} Q ${x1} ${y1} ${x2} ${y2} Q ${x3} ${y3} ${cx} ${cy}`);
+        petal.setAttribute('fill', 'none');
+        const hue = 240 + (i / segments) * 60;
+        petal.setAttribute('stroke', `hsla(${hue}, 40%, 45%, ${totalDecay * 0.2})`);
+        petal.setAttribute('stroke-width', '0.8');
+        petal.setAttribute('filter', 'url(#archGlow)');
+        archGroup.appendChild(petal);
+      }
+
+      const outline = document.createElementNS(ns, 'circle');
+      outline.setAttribute('cx', cx);
+      outline.setAttribute('cy', cy);
+      outline.setAttribute('r', roseR);
+      outline.setAttribute('fill', 'none');
+      outline.setAttribute('stroke', `hsla(260, 35%, 40%, ${totalDecay * 0.15})`);
+      outline.setAttribute('stroke-width', '1');
+      archGroup.appendChild(outline);
+    }
+  }
+
+  function animate() {
+    const dt = 1 / 60;
+    time += dt;
+
+    // Clean dead sources
+    for (let i = sources.length - 1; i >= 0; i--) {
+      if (time - sources[i].birth > sources[i].life) sources.splice(i, 1);
+    }
+
+    for (let i = 0; i < TOTAL; i++) {
+      const c = cells[i];
+      const dx = mx - c.x;
+      const dy = my - c.y;
+      const dist = Math.sqrt(dx * dx + dy * dy);
+      const mf = Math.max(0, 1 - dist / 200);
+
+      // Wave interference at this cell
+      const wave = waveAt(c.x + CELL_W / 2, c.y + CELL_H / 2, time);
+      const absWave = Math.abs(wave);
+
+      // Base hue from diagonal position + slow time rotation
+      const baseHue = (c.col / COLS * 260 + c.row / ROWS * 40 + time * 15) % 360;
+
+      // Cathedral layout: cells form pillars at source positions and arches between them
+      let pillarInfluence = 0;
+      let nearestHue = baseHue;
+      for (const src of sources) {
+        const age = time - src.birth;
+        if (age > src.life) continue;
+        const decay = 1 - age / src.life;
+        const sd = Math.sqrt((c.homeX - src.x) ** 2 + (c.homeY - src.y) ** 2);
+        const inf = Math.max(0, 1 - sd / 80) * decay;
+        if (inf > pillarInfluence) {
+          pillarInfluence = inf;
+          nearestHue = src.hue;
+        }
+      }
+
+      // Breathing base motion
+      const breath = Math.sin(time * c.freq * 0.5 + c.phaseOff) * 3;
+
+      // Wave-driven displacement
+      const wavePush = wave * 12;
+      c.x = c.homeX + breath + wavePush * 0.6;
+      c.y = c.homeY + Math.cos(time * c.freq * 0.3 + c.phaseOff) * 2 + wavePush * 0.4;
+
+      // Pillar cells cluster toward sources
+      if (pillarInfluence > 0.1) {
+        c.scale = 0.9 + pillarInfluence * 0.8 + absWave * 0.3;
+      } else {
+        c.scale = 0.7 + absWave * 0.5 + mf * 0.4;
+      }
+
+      c.angle = wave * 15 + mf * 10;
+      c.w = (CELL_W - 1) * (0.8 + absWave * 0.4);
+      c.h = (CELL_H - 1) * (0.8 + absWave * 0.4);
+      c.opacity = 0.7 + absWave * 0.3 + pillarInfluence * 0.3;
+
+      // Color: blend between base rainbow and source hues based on wave + pillar
+      c.hue = baseHue + wave * 40 + pillarInfluence * (nearestHue - baseHue) * 0.6;
+      c.sat = 75 + absWave * 20 + pillarInfluence * 15;
+      c.light = 35 + absWave * 20 + pillarInfluence * 15 + mf * 15;
+
+      // Render
+      const bRadius = (c.tag === 'button' || c.tag === 'span') ? (3 + mf * 10) :
+                       (c.tag === 'input' || c.tag === 'select') ? (2 + mf * 5) : (1 + mf * 3);
+      const glow = 2 + absWave * 12 + pillarInfluence * 10;
+      const borderAlpha = 0.2 + absWave * 0.4 + pillarInfluence * 0.3;
+
+      c.el.style.cssText =
+        `position:absolute;` +
+        `left:${c.x|0}px;top:${c.y|0}px;` +
+        `width:${Math.max(3, c.w)|0}px;height:${Math.max(3, c.h)|0}px;` +
+        `transform:rotate(${c.angle.toFixed(1)}deg) scale(${c.scale.toFixed(3)});` +
+        `background:hsl(${c.hue|0},${c.sat|0}%,${c.light|0}%);` +
+        `color:hsl(${((c.hue + 180) % 360)|0},85%,80%);` +
+        `opacity:${c.opacity.toFixed(2)};` +
+        `border:1px solid hsla(${((c.hue + 40) % 360)|0},90%,65%,${borderAlpha.toFixed(2)});` +
+        `border-radius:${bRadius|0}px;` +
+        `box-shadow:0 0 ${glow|0}px hsla(${c.hue|0},90%,60%,${(0.1 + absWave * 0.3).toFixed(2)});` +
+        `font-size:${(9 + mf * 4)|0}px;` +
+        `text-align:center;line-height:${Math.max(3, c.h)|0}px;` +
+        `overflow:hidden;pointer-events:none;-webkit-appearance:none;appearance:none;`;
+    }
+
+    renderArches();
+    requestAnimationFrame(animate);
+  }
+
+  requestAnimationFrame(animate);
+})();
+</script>
+</body>
+</html>

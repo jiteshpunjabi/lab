@@ -1,0 +1,433 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=1280,height=720">
+<title>Synesthesia Terrain</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { background: #0a0a12; overflow: hidden; width: 1280px; height: 720px; font-family: monospace; }
+canvas { display: block; }
+#prompt {
+  position: absolute;
+  bottom: 30px;
+  left: 50%;
+  transform: translateX(-50%);
+  color: rgba(255,255,255,0.35);
+  font-size: 14px;
+  font-family: monospace;
+  letter-spacing: 2px;
+  pointer-events: none;
+  transition: opacity 2s;
+}
+#typed-text {
+  position: absolute;
+  top: 20px;
+  left: 30px;
+  right: 30px;
+  color: rgba(255,255,255,0.1);
+  font-size: 11px;
+  font-family: monospace;
+  letter-spacing: 3px;
+  word-break: break-all;
+  line-height: 1.8;
+  pointer-events: none;
+}
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="prompt">type anything -- each letter is a color, a sound, a place</div>
+<div id="typed-text"></div>
+<script>
+(() => {
+  const canvas = document.getElementById('c');
+  const ctx = canvas.getContext('2d');
+  const W = 1280, H = 720;
+  canvas.width = W;
+  canvas.height = H;
+
+  // Audio
+  let audioCtx = null;
+  let masterGain = null;
+  let delayNode = null;
+
+  function initAudio() {
+    if (audioCtx) return;
+    audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    masterGain = audioCtx.createGain();
+    masterGain.gain.value = 0.25;
+
+    delayNode = audioCtx.createDelay(1.0);
+    delayNode.delayTime.value = 0.35;
+    const feedback = audioCtx.createGain();
+    feedback.gain.value = 0.3;
+    const delayFilter = audioCtx.createBiquadFilter();
+    delayFilter.type = 'lowpass';
+    delayFilter.frequency.value = 1800;
+
+    masterGain.connect(audioCtx.destination);
+    masterGain.connect(delayNode);
+    delayNode.connect(delayFilter);
+    delayFilter.connect(feedback);
+    feedback.connect(delayNode);
+    delayNode.connect(audioCtx.destination);
+  }
+
+  // Pentatonic scale across 2.5 octaves -- always consonant
+  const scale = [
+    220.00, 246.94, 277.18, 329.63, 369.99,
+    440.00, 493.88, 554.37, 659.25, 739.99,
+    880.00, 987.77, 1108.73, 1318.51, 1479.98,
+    1760.00, 1975.53, 2217.46, 2637.02, 2959.96,
+    261.63, 293.66, 311.13, 349.23, 392.00, 523.25
+  ];
+
+  function charIndex(ch) {
+    const i = ch.toLowerCase().charCodeAt(0) - 97;
+    return (i >= 0 && i <= 25) ? i : -1;
+  }
+
+  function charToHue(ch) {
+    const i = charIndex(ch);
+    if (i < 0) return 220;
+    return (i * 360 / 26 + 10) % 360;
+  }
+
+  function charToFreq(ch) {
+    const i = charIndex(ch);
+    if (i < 0) return 440;
+    return scale[i];
+  }
+
+  function charToElevation(ch) {
+    const i = charIndex(ch);
+    if (i < 0) return 0.35;
+    // Vowels are valleys, consonants rise by position
+    const vowels = [0, 4, 8, 14, 20];
+    if (vowels.includes(i)) return 0.15 + (i / 25) * 0.2;
+    return 0.4 + (i / 25) * 0.5;
+  }
+
+  function charToWave(ch) {
+    const i = charIndex(ch);
+    if (i < 0) return 'sine';
+    return ['sine', 'triangle', 'sine', 'triangle'][i % 4];
+  }
+
+  function playNote(ch) {
+    initAudio();
+    const freq = charToFreq(ch);
+    const now = audioCtx.currentTime;
+
+    const osc = audioCtx.createOscillator();
+    const gain = audioCtx.createGain();
+    const filter = audioCtx.createBiquadFilter();
+
+    osc.type = charToWave(ch);
+    osc.frequency.setValueAtTime(freq, now);
+    osc.detune.setValueAtTime((Math.random() - 0.5) * 8, now);
+
+    filter.type = 'lowpass';
+    filter.frequency.setValueAtTime(Math.min(freq * 4, 8000), now);
+    filter.Q.value = 1.5;
+
+    gain.gain.setValueAtTime(0, now);
+    gain.gain.linearRampToValueAtTime(0.2, now + 0.015);
+    gain.gain.exponentialRampToValueAtTime(0.001, now + 1.4);
+
+    osc.connect(filter);
+    filter.connect(gain);
+    gain.connect(masterGain);
+
+    osc.start(now);
+    osc.stop(now + 1.5);
+  }
+
+  // Terrain columns
+  const columns = [];
+  const MAX_COLS = 120;
+  const COL_W = 10;
+  let totalTyped = '';
+  const particles = [];
+
+  function addColumn(ch) {
+    const hue = charToHue(ch);
+    const elev = ch === ' ' ? 0.15 : charToElevation(ch);
+    const sat = ch === ' ' ? 15 : 65 + Math.random() * 25;
+    columns.push({ char: ch, hue, elevation: elev, saturation: sat, time: performance.now() });
+    if (columns.length > MAX_COLS) columns.shift();
+
+    // Particles burst from the new peak
+    const x = Math.min(columns.length - 1, MAX_COLS - 1) * COL_W + COL_W / 2;
+    const groundY = terrainY(elev);
+    for (let i = 0; i < 8; i++) {
+      particles.push({
+        x: x + (Math.random() - 0.5) * 14,
+        y: groundY,
+        vx: (Math.random() - 0.5) * 2.5,
+        vy: -Math.random() * 3.5 - 1.5,
+        hue, life: 1, size: 1.5 + Math.random() * 3
+      });
+    }
+  }
+
+  function terrainY(elev) {
+    return H * (1 - elev * 0.55) - 50;
+  }
+
+  function lerp(a, b, t) { return a + (b - a) * t; }
+
+  // Keyboard handler
+  document.addEventListener('keydown', (e) => {
+    if (e.ctrlKey || e.metaKey || e.altKey) return;
+    if (e.key === 'Backspace') {
+      if (columns.length > 0) columns.pop();
+      totalTyped = totalTyped.slice(0, -1);
+      document.getElementById('typed-text').textContent = totalTyped;
+      return;
+    }
+    if (e.key.length !== 1) return;
+    e.preventDefault();
+
+    addColumn(e.key);
+    totalTyped += e.key;
+    document.getElementById('typed-text').textContent = totalTyped;
+
+    if (e.key !== ' ') playNote(e.key);
+
+    document.getElementById('prompt').style.opacity = '0';
+  });
+
+  // Auto-type seed phrase for screenshot / first impression
+  const seed = 'every word is a mountain range';
+  let si = 0;
+  function autoType() {
+    if (si < seed.length) {
+      const ch = seed[si];
+      addColumn(ch);
+      totalTyped += ch;
+      document.getElementById('typed-text').textContent = totalTyped;
+      if (ch !== ' ') playNote(ch);
+      si++;
+      setTimeout(autoType, 100 + Math.random() * 80);
+    }
+  }
+  setTimeout(autoType, 600);
+
+  // Render loop
+  function draw(time) {
+    // Sky gradient
+    const sky = ctx.createLinearGradient(0, 0, 0, H);
+    sky.addColorStop(0, '#04040c');
+    sky.addColorStop(0.45, '#08081a');
+    sky.addColorStop(1, '#0c0c24');
+    ctx.fillStyle = sky;
+    ctx.fillRect(0, 0, W, H);
+
+    // Ambient stars
+    ctx.globalAlpha = 0.25;
+    for (let i = 0; i < 50; i++) {
+      const sx = (i * 137.508 + time * 0.001) % W;
+      const sy = (i * 89.3 + Math.sin(time * 0.0008 + i) * 4) % (H * 0.35);
+      ctx.fillStyle = `hsl(${(i * 53) % 360}, 35%, 55%)`;
+      ctx.fillRect(sx, sy, 1.2, 1.2);
+    }
+    ctx.globalAlpha = 1;
+
+    if (columns.length === 0) {
+      // Idle: pulsing horizon
+      const pa = 0.12 + Math.sin(time * 0.002) * 0.04;
+      ctx.strokeStyle = `rgba(100, 130, 255, ${pa})`;
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      for (let x = 0; x < W; x++) {
+        const y = H * 0.68 + Math.sin(x * 0.015 + time * 0.001) * 6;
+        x === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+      }
+      ctx.stroke();
+      requestAnimationFrame(draw);
+      return;
+    }
+
+    // Center terrain when few columns, right-align when many
+    const totalW = columns.length * COL_W;
+    const offsetX = totalW < W ? (W - totalW) / 2 : W - totalW;
+
+    // -- Reflection layer (underwater) --
+    ctx.globalAlpha = 0.1;
+    for (let i = 0; i < columns.length; i++) {
+      const col = columns[i];
+      const x = offsetX + i * COL_W;
+      const gy = terrainY(col.elevation);
+      const ry = H - (H - gy) * 0.25;
+      ctx.fillStyle = `hsl(${col.hue}, ${col.saturation * 0.4}%, 15%)`;
+      ctx.fillRect(x, ry, COL_W, H - ry);
+    }
+    ctx.globalAlpha = 1;
+
+    // -- Aurora glow behind peaks --
+    ctx.globalAlpha = 0.12;
+    for (let i = 0; i < columns.length; i++) {
+      const col = columns[i];
+      if (col.char === ' ') continue;
+      const x = offsetX + i * COL_W + COL_W / 2;
+      const gy = terrainY(col.elevation);
+      const glowH = (gy - H * 0.15);
+      const grad = ctx.createRadialGradient(x, gy - 20, 0, x, gy - 20, Math.abs(glowH) * 0.6);
+      grad.addColorStop(0, `hsla(${col.hue}, 70%, 50%, 0.3)`);
+      grad.addColorStop(0.5, `hsla(${col.hue}, 60%, 35%, 0.1)`);
+      grad.addColorStop(1, `hsla(${col.hue}, 50%, 20%, 0)`);
+      ctx.fillStyle = grad;
+      ctx.fillRect(x - 40, gy - Math.abs(glowH) * 0.6, 80, Math.abs(glowH) * 0.6);
+    }
+    ctx.globalAlpha = 1;
+
+    // -- Terrain body --
+    for (let i = 0; i < columns.length; i++) {
+      const col = columns[i];
+      const x = offsetX + i * COL_W;
+      const gy = terrainY(col.elevation);
+      const age = (time - col.time) / 1000;
+      const bright = Math.max(0.45, 1 - age * 0.04);
+
+      const g = ctx.createLinearGradient(x, gy, x, H);
+      const l = Math.min(60, 30 + bright * 28);
+      g.addColorStop(0, `hsl(${col.hue}, ${col.saturation}%, ${l}%)`);
+      g.addColorStop(0.35, `hsl(${col.hue}, ${col.saturation * 0.6}%, ${l * 0.55}%)`);
+      g.addColorStop(1, `hsl(${col.hue}, ${col.saturation * 0.2}%, 6%)`);
+      ctx.fillStyle = g;
+      ctx.fillRect(x, gy, COL_W, H - gy);
+    }
+
+    // -- Ridge line with glow --
+    ctx.beginPath();
+    for (let i = 0; i < columns.length; i++) {
+      const x = offsetX + i * COL_W + COL_W / 2;
+      let y = terrainY(columns[i].elevation);
+      if (i > 0 && i < columns.length - 1) {
+        const yp = terrainY(columns[i-1].elevation);
+        const yn = terrainY(columns[i+1].elevation);
+        y = lerp(lerp(yp, y, 0.5), lerp(y, yn, 0.5), 0.5);
+      }
+      i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+    }
+    ctx.shadowColor = 'rgba(180, 210, 255, 0.6)';
+    ctx.shadowBlur = 14;
+    ctx.strokeStyle = 'rgba(210, 225, 255, 0.45)';
+    ctx.lineWidth = 2;
+    ctx.stroke();
+    ctx.shadowBlur = 0;
+
+    // -- Letters on ridgeline --
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    for (let i = 0; i < columns.length; i++) {
+      const col = columns[i];
+      if (col.char === ' ') continue;
+      const x = offsetX + i * COL_W + COL_W / 2;
+      const gy = terrainY(col.elevation);
+      const age = (time - col.time) / 1000;
+      const la = Math.max(0.12, 0.95 - age * 0.025);
+      const fs = Math.max(7, 13 - age * 0.08);
+      ctx.font = `bold ${fs}px monospace`;
+      ctx.fillStyle = `hsla(${col.hue}, 80%, 75%, ${la})`;
+      ctx.shadowColor = `hsla(${col.hue}, 90%, 60%, ${la * 0.7})`;
+      ctx.shadowBlur = 10;
+      ctx.fillText(col.char, x, gy - 12);
+      ctx.shadowBlur = 0;
+
+      // Ghost letters falling
+      for (let g = 1; g <= 3; g++) {
+        const fy = gy + g * 38 + Math.sin(time * 0.003 + i + g) * 6;
+        if (fy > H - 10) continue;
+        ctx.globalAlpha = la * (0.25 / g);
+        ctx.font = `${Math.max(5, fs - g * 2)}px monospace`;
+        ctx.fillStyle = `hsl(${col.hue}, 45%, 45%)`;
+        ctx.fillText(col.char, x, fy);
+        ctx.globalAlpha = 1;
+      }
+    }
+
+    // -- Pitch bands (horizontal frequency visualization) --
+    ctx.globalAlpha = 0.055;
+    for (let i = 0; i < columns.length; i++) {
+      const col = columns[i];
+      if (col.char === ' ') continue;
+      const freq = charToFreq(col.char);
+      const nf = (freq - 220) / (2960 - 220);
+      const bandY = H * 0.06 + nf * H * 0.32;
+      const x = offsetX + i * COL_W;
+      ctx.fillStyle = `hsl(${col.hue}, 65%, 55%)`;
+      ctx.fillRect(x, bandY - 1, COL_W, 2.5);
+    }
+    ctx.globalAlpha = 1;
+
+    // -- Arcs connecting repeated letters --
+    ctx.globalAlpha = 0.07;
+    const seen = {};
+    for (let i = 0; i < columns.length; i++) {
+      const ch = columns[i].char.toLowerCase();
+      if (ch === ' ') continue;
+      const x = offsetX + i * COL_W + COL_W / 2;
+      const y = terrainY(columns[i].elevation);
+      if (seen[ch] !== undefined) {
+        const pi = seen[ch];
+        const px = offsetX + pi * COL_W + COL_W / 2;
+        const py = terrainY(columns[pi].elevation);
+        ctx.beginPath();
+        ctx.moveTo(px, py - 12);
+        ctx.quadraticCurveTo((px + x) / 2, Math.min(py, y) - 70, x, y - 12);
+        ctx.strokeStyle = `hsl(${columns[i].hue}, 55%, 45%)`;
+        ctx.lineWidth = 1;
+        ctx.stroke();
+      }
+      seen[ch] = i;
+    }
+    ctx.globalAlpha = 1;
+
+    // -- Particles --
+    for (let i = particles.length - 1; i >= 0; i--) {
+      const p = particles[i];
+      p.x += p.vx;
+      p.y += p.vy;
+      p.vy += 0.05;
+      p.life -= 0.012;
+      if (p.life <= 0) { particles.splice(i, 1); continue; }
+      ctx.fillStyle = `hsla(${p.hue}, 75%, 65%, ${p.life * 0.6})`;
+      ctx.shadowColor = `hsla(${p.hue}, 85%, 70%, ${p.life * 0.4})`;
+      ctx.shadowBlur = 5;
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, p.size * p.life, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.shadowBlur = 0;
+    }
+
+    // -- Info overlay for latest char --
+    if (columns.length > 0) {
+      const last = columns[columns.length - 1];
+      if (last.char !== ' ') {
+        const age = (time - last.time) / 1000;
+        const a = Math.max(0, 1 - age * 0.6);
+        if (a > 0) {
+          ctx.globalAlpha = a * 0.45;
+          ctx.font = '11px monospace';
+          ctx.fillStyle = `hsl(${last.hue}, 65%, 70%)`;
+          ctx.textAlign = 'right';
+          const freq = charToFreq(last.char);
+          ctx.fillText(`${last.char.toUpperCase()} -> ${Math.round(freq)}Hz`, W - 28, H - 48);
+          ctx.fillText(`hue ${Math.round(last.hue)}deg  elev ${Math.round(last.elevation * 100)}%`, W - 28, H - 33);
+          ctx.textAlign = 'center';
+          ctx.globalAlpha = 1;
+        }
+      }
+    }
+
+    requestAnimationFrame(draw);
+  }
+
+  requestAnimationFrame(draw);
+})();
+</script>
+</body>
+</html>

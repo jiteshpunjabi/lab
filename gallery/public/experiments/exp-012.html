@@ -1,0 +1,466 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>exp-012 — Stained Glass Organism</title>
+<style>
+  *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    width: 100vw;
+    height: 100vh;
+    overflow: hidden;
+    background: #050008;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .world {
+    position: fixed;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    animation: worldHue 40s linear infinite;
+  }
+  @keyframes worldHue {
+    0%   { filter: hue-rotate(0deg); }
+    100% { filter: hue-rotate(360deg); }
+  }
+
+  /* The cell container — CSS handles breathing and mitosis */
+  .cell {
+    position: absolute;
+    width: 400px;
+    height: 400px;
+    border-radius: 50%;
+    animation: cellBreathe 6s ease-in-out infinite alternate;
+    overflow: hidden;
+  }
+  @keyframes cellBreathe {
+    0%   { transform: scale(1) rotate(0deg); }
+    50%  { transform: scale(1.08) rotate(3deg); }
+    100% { transform: scale(1.02) rotate(-2deg); }
+  }
+
+  /* WebGL canvas fills the cell — shader paints the stained-glass interior */
+  .cell canvas {
+    position: absolute;
+    width: 100%;
+    height: 100%;
+    border-radius: 50%;
+  }
+
+  /* Membrane — CSS glow ring */
+  .membrane {
+    position: absolute;
+    width: 440px;
+    height: 440px;
+    top: 50%; left: 50%;
+    transform: translate(-50%, -50%);
+    border-radius: 50%;
+    border: 2px solid rgba(255, 150, 255, 0.3);
+    box-shadow:
+      0 0 50px rgba(255, 50, 200, 0.25),
+      0 0 100px rgba(200, 50, 255, 0.12),
+      inset 0 0 50px rgba(255, 100, 255, 0.08);
+    animation: membranePulse 4s ease-in-out infinite alternate, membraneWobble 7s ease-in-out infinite;
+    pointer-events: none;
+  }
+  @keyframes membranePulse {
+    0%   { border-color: rgba(255, 100, 255, 0.3); box-shadow: 0 0 50px rgba(255, 50, 200, 0.25), 0 0 100px rgba(200, 50, 255, 0.12), inset 0 0 50px rgba(255, 100, 255, 0.08); }
+    100% { border-color: rgba(100, 200, 255, 0.5); box-shadow: 0 0 70px rgba(100, 200, 255, 0.35), 0 0 140px rgba(50, 100, 255, 0.18), inset 0 0 70px rgba(100, 200, 255, 0.12); }
+  }
+  @keyframes membraneWobble {
+    0%   { border-radius: 50%; }
+    25%  { border-radius: 47% 53% 50% 50%; }
+    50%  { border-radius: 50% 47% 53% 50%; }
+    75%  { border-radius: 53% 50% 47% 53%; }
+    100% { border-radius: 50%; }
+  }
+
+  /* Organelles orbit via CSS */
+  .organelle {
+    position: absolute;
+    border-radius: 50%;
+    mix-blend-mode: screen;
+    pointer-events: none;
+  }
+  .organelle-1 {
+    width: 35px; height: 35px;
+    background: radial-gradient(circle, rgba(255,100,0,0.8) 0%, rgba(255,0,100,0.5) 50%, transparent 100%);
+    top: 50%; left: 50%;
+    animation: orbit1 9s linear infinite;
+  }
+  @keyframes orbit1 {
+    0%   { transform: translate(-50%, -50%) rotate(0deg) translateX(180px) rotate(0deg); }
+    100% { transform: translate(-50%, -50%) rotate(360deg) translateX(180px) rotate(-360deg); }
+  }
+  .organelle-2 {
+    width: 28px; height: 28px;
+    background: radial-gradient(circle, rgba(0,255,136,0.8) 0%, rgba(0,136,255,0.5) 50%, transparent 100%);
+    top: 50%; left: 50%;
+    animation: orbit2 13s linear infinite;
+  }
+  @keyframes orbit2 {
+    0%   { transform: translate(-50%, -50%) rotate(120deg) translateX(195px) rotate(-120deg); }
+    100% { transform: translate(-50%, -50%) rotate(480deg) translateX(195px) rotate(-480deg); }
+  }
+  .organelle-3 {
+    width: 22px; height: 22px;
+    background: radial-gradient(circle, rgba(255,255,0,0.8) 0%, rgba(255,0,255,0.5) 50%, transparent 100%);
+    top: 50%; left: 50%;
+    animation: orbit3 7s linear infinite reverse;
+  }
+  @keyframes orbit3 {
+    0%   { transform: translate(-50%, -50%) rotate(240deg) translateX(170px) rotate(-240deg); }
+    100% { transform: translate(-50%, -50%) rotate(600deg) translateX(170px) rotate(-600deg); }
+  }
+
+  /* Cilia */
+  .cilium {
+    position: absolute;
+    top: 50%; left: 50%;
+    width: 2px;
+    height: 25px;
+    background: linear-gradient(to top, rgba(255,150,255,0.4), transparent);
+    transform-origin: bottom center;
+    border-radius: 1px;
+    pointer-events: none;
+  }
+  .cilium-1  { animation: wave 2.2s ease-in-out 0s infinite alternate;    transform: translate(-50%, -50%) rotate(0deg)   translateY(-220px); }
+  .cilium-2  { animation: wave 2.2s ease-in-out 0.18s infinite alternate;  transform: translate(-50%, -50%) rotate(30deg)  translateY(-220px); }
+  .cilium-3  { animation: wave 2.2s ease-in-out 0.36s infinite alternate;  transform: translate(-50%, -50%) rotate(60deg)  translateY(-220px); }
+  .cilium-4  { animation: wave 2.2s ease-in-out 0.54s infinite alternate;  transform: translate(-50%, -50%) rotate(90deg)  translateY(-220px); }
+  .cilium-5  { animation: wave 2.2s ease-in-out 0.72s infinite alternate;  transform: translate(-50%, -50%) rotate(120deg) translateY(-220px); }
+  .cilium-6  { animation: wave 2.2s ease-in-out 0.90s infinite alternate;  transform: translate(-50%, -50%) rotate(150deg) translateY(-220px); }
+  .cilium-7  { animation: wave 2.2s ease-in-out 1.08s infinite alternate;  transform: translate(-50%, -50%) rotate(180deg) translateY(-220px); }
+  .cilium-8  { animation: wave 2.2s ease-in-out 1.26s infinite alternate;  transform: translate(-50%, -50%) rotate(210deg) translateY(-220px); }
+  .cilium-9  { animation: wave 2.2s ease-in-out 1.44s infinite alternate;  transform: translate(-50%, -50%) rotate(240deg) translateY(-220px); }
+  .cilium-10 { animation: wave 2.2s ease-in-out 1.62s infinite alternate;  transform: translate(-50%, -50%) rotate(270deg) translateY(-220px); }
+  .cilium-11 { animation: wave 2.2s ease-in-out 1.80s infinite alternate;  transform: translate(-50%, -50%) rotate(300deg) translateY(-220px); }
+  .cilium-12 { animation: wave 2.2s ease-in-out 1.98s infinite alternate;  transform: translate(-50%, -50%) rotate(330deg) translateY(-220px); }
+  @keyframes wave {
+    0%   { height: 25px; opacity: 0.4; }
+    100% { height: 40px; opacity: 0.8; }
+  }
+
+  /* Mitosis — daughters emerge, trailing stained-glass residue */
+  .daughter {
+    position: absolute;
+    width: 140px;
+    height: 140px;
+    top: 50%; left: 50%;
+    border-radius: 50%;
+    opacity: 0;
+    overflow: hidden;
+    animation: mitosis 14s ease-in-out infinite;
+  }
+  .daughter canvas {
+    position: absolute;
+    width: 100%;
+    height: 100%;
+    border-radius: 50%;
+  }
+  .daughter-1 {
+    box-shadow: 0 0 40px rgba(255, 68, 170, 0.4);
+  }
+  @keyframes mitosis {
+    0%   { transform: translate(-50%, -50%) translateX(0); opacity: 0; }
+    30%  { transform: translate(-50%, -50%) translateX(0); opacity: 0; }
+    50%  { transform: translate(-50%, -50%) translateX(-220px); opacity: 0.85; }
+    65%  { transform: translate(-50%, -50%) translateX(-240px) scale(0.85); opacity: 0.6; }
+    80%  { transform: translate(-50%, -50%) translateX(-120px) scale(0.6); opacity: 0.2; }
+    90%  { transform: translate(-50%, -50%) translateX(0); opacity: 0; }
+    100% { transform: translate(-50%, -50%) translateX(0); opacity: 0; }
+  }
+  .daughter-2 {
+    box-shadow: 0 0 40px rgba(68, 170, 255, 0.4);
+    animation-name: mitosis2;
+  }
+  @keyframes mitosis2 {
+    0%   { transform: translate(-50%, -50%) translateX(0); opacity: 0; }
+    30%  { transform: translate(-50%, -50%) translateX(0); opacity: 0; }
+    50%  { transform: translate(-50%, -50%) translateX(220px); opacity: 0.85; }
+    65%  { transform: translate(-50%, -50%) translateX(240px) scale(0.85); opacity: 0.6; }
+    80%  { transform: translate(-50%, -50%) translateX(120px) scale(0.6); opacity: 0.2; }
+    90%  { transform: translate(-50%, -50%) translateX(0); opacity: 0; }
+    100% { transform: translate(-50%, -50%) translateX(0); opacity: 0; }
+  }
+
+  /* Chromatin bridge */
+  .bridge {
+    position: absolute;
+    width: 200px;
+    height: 8px;
+    top: 50%; left: 50%;
+    transform: translate(-50%, -50%);
+    border-radius: 4px;
+    opacity: 0;
+    animation: bridgeStretch 14s ease-in-out infinite;
+    pointer-events: none;
+    overflow: hidden;
+  }
+  .bridge canvas {
+    position: absolute;
+    width: 100%;
+    height: 100%;
+  }
+  @keyframes bridgeStretch {
+    0%   { width: 0; opacity: 0; }
+    30%  { width: 0; opacity: 0; }
+    45%  { width: 140px; opacity: 0.9; }
+    55%  { width: 380px; opacity: 0.7; }
+    70%  { width: 420px; opacity: 0.15; }
+    80%  { width: 0; opacity: 0; }
+    100% { width: 0; opacity: 0; }
+  }
+
+  /* Ambient spores */
+  .spore {
+    position: absolute;
+    border-radius: 50%;
+    mix-blend-mode: screen;
+    pointer-events: none;
+  }
+  .spore-1 { width: 6px; height: 6px; background: #ff6699; top: 18%; left: 12%; animation: float1 9s ease-in-out infinite; }
+  .spore-2 { width: 4px; height: 4px; background: #66ffcc; top: 78%; left: 82%; animation: float2 11s ease-in-out infinite; }
+  .spore-3 { width: 7px; height: 7px; background: #ffcc33; top: 28%; left: 88%; animation: float3 7s ease-in-out infinite; }
+  .spore-4 { width: 5px; height: 5px; background: #9966ff; top: 82%; left: 22%; animation: float4 13s ease-in-out infinite; }
+  .spore-5 { width: 6px; height: 6px; background: #ff3366; top: 8%;  left: 55%; animation: float5 10s ease-in-out infinite; }
+  .spore-6 { width: 3px; height: 3px; background: #33ccff; top: 65%; left: 8%;  animation: float6 8s ease-in-out infinite; }
+
+  @keyframes float1 { 0%,100% { transform: translate(0,0); opacity: 0.4; } 50% { transform: translate(30px, -40px); opacity: 1; } }
+  @keyframes float2 { 0%,100% { transform: translate(0,0); opacity: 0.3; } 50% { transform: translate(-40px, 20px); opacity: 0.9; } }
+  @keyframes float3 { 0%,100% { transform: translate(0,0); opacity: 0.5; } 50% { transform: translate(-20px, -30px); opacity: 1; } }
+  @keyframes float4 { 0%,100% { transform: translate(0,0); opacity: 0.3; } 50% { transform: translate(35px, -25px); opacity: 0.8; } }
+  @keyframes float5 { 0%,100% { transform: translate(0,0); opacity: 0.4; } 50% { transform: translate(-25px, 35px); opacity: 1; } }
+  @keyframes float6 { 0%,100% { transform: translate(0,0); opacity: 0.5; } 50% { transform: translate(20px, -15px); opacity: 0.9; } }
+</style>
+</head>
+<body>
+  <div class="world">
+    <!-- Spores -->
+    <div class="spore spore-1"></div>
+    <div class="spore spore-2"></div>
+    <div class="spore spore-3"></div>
+    <div class="spore spore-4"></div>
+    <div class="spore spore-5"></div>
+    <div class="spore spore-6"></div>
+
+    <!-- The cell -->
+    <div class="cell">
+      <canvas id="main-shader"></canvas>
+
+      <!-- Cilia -->
+      <div class="cilium cilium-1"></div>
+      <div class="cilium cilium-2"></div>
+      <div class="cilium cilium-3"></div>
+      <div class="cilium cilium-4"></div>
+      <div class="cilium cilium-5"></div>
+      <div class="cilium cilium-6"></div>
+      <div class="cilium cilium-7"></div>
+      <div class="cilium cilium-8"></div>
+      <div class="cilium cilium-9"></div>
+      <div class="cilium cilium-10"></div>
+      <div class="cilium cilium-11"></div>
+      <div class="cilium cilium-12"></div>
+
+      <!-- Membrane -->
+      <div class="membrane"></div>
+
+      <!-- Organelles -->
+      <div class="organelle organelle-1"></div>
+      <div class="organelle organelle-2"></div>
+      <div class="organelle organelle-3"></div>
+    </div>
+
+    <!-- Mitosis daughters with their own shader interiors -->
+    <div class="bridge"><canvas id="bridge-shader"></canvas></div>
+    <div class="daughter daughter-1"><canvas id="d1-shader"></canvas></div>
+    <div class="daughter daughter-2"><canvas id="d2-shader"></canvas></div>
+  </div>
+
+<script>
+// Fragment shader: stained-glass tessellation shaped like cell biology
+// Inherits exp-006's trig-field tessellation but adds nucleus glow,
+// organelle voids, and a radial cell boundary falloff
+
+const FRAG = `
+precision highp float;
+uniform float u_time;
+uniform vec2 u_resolution;
+uniform float u_variant; // 0 = main cell, 1 = daughter-left, 2 = daughter-right, 3 = bridge
+
+vec3 hsv2rgb(float h, float s, float v) {
+  vec3 c = vec3(h * 6.0, s, v);
+  vec3 rgb = clamp(abs(mod(c.x + vec3(0.0, 4.0, 2.0), 6.0) - 3.0) - 1.0, 0.0, 1.0);
+  return v * mix(vec3(1.0), rgb, s);
+}
+
+void main() {
+  vec2 uv = gl_FragCoord.xy / u_resolution;
+  vec2 p = (gl_FragCoord.xy - 0.5 * u_resolution) / min(u_resolution.x, u_resolution.y);
+
+  float t = u_time * 0.35;
+
+  // Radial distance from center — used for cell boundary
+  float r = length(p);
+
+  // Tessellation fields — from exp-006, but warped by radial position
+  float warp = 1.0 + r * 0.5; // cells stretch at the periphery
+  float s1 = sin(p.x * 10.0 * warp + t) * cos(p.y * 10.0 * warp - t * 0.7);
+  float s2 = sin((p.x * 0.866 + p.y * 0.5) * 12.0 + t * 1.3) *
+             cos((p.x * 0.5 - p.y * 0.866) * 12.0 - t * 0.9);
+  float s3 = sin(r * 15.0 - t * 2.5) * 0.6; // radial rings like endoplasmic reticulum
+
+  float cell = s1 + s2 + s3;
+  float edge = 1.0 - smoothstep(0.0, 0.12, abs(cell));
+
+  // Nucleus glow — hot center
+  float nucleusGlow = exp(-r * r * 12.0);
+
+  // Color: radial hue gradient (nucleus warm, periphery cool) + time rotation
+  float hue = fract(r * 0.4 + atan(p.y, p.x) / 6.2832 + t * 0.08);
+  // Warm shift near nucleus
+  hue = mix(hue, fract(0.05 + t * 0.05), nucleusGlow * 0.7);
+
+  float sat = 0.65 + 0.35 * sin(cell * 3.14);
+  float val = 0.3 + 0.5 * (0.5 + 0.5 * sin(cell * 2.0 + t));
+
+  // Nucleus brightening
+  val += nucleusGlow * 0.5;
+  sat -= nucleusGlow * 0.3;
+
+  vec3 color = hsv2rgb(hue, sat, val);
+
+  // Stained-glass leading edges — luminous boundaries
+  color = mix(color, vec3(1.0, 0.92, 0.75), edge * 0.6);
+
+  // Variant coloring
+  if (u_variant > 0.5 && u_variant < 1.5) {
+    // daughter-left: magenta shift
+    color *= vec3(1.2, 0.7, 1.1);
+  } else if (u_variant > 1.5 && u_variant < 2.5) {
+    // daughter-right: cyan shift
+    color *= vec3(0.7, 1.0, 1.3);
+  } else if (u_variant > 2.5) {
+    // bridge: stretched, more edge-heavy
+    color = mix(color, vec3(1.0, 0.8, 0.5), edge * 0.4);
+  }
+
+  // Cell boundary falloff — soft edge for circular shape
+  float boundary = 1.0 - smoothstep(0.38, 0.5, r);
+  color *= boundary;
+
+  // Ensure black outside cell
+  if (u_variant < 0.5) {
+    color *= step(r, 0.52);
+  }
+
+  // Minimum dark floor inside
+  if (r < 0.48) {
+    color = max(color, vec3(0.04, 0.02, 0.06));
+  }
+
+  gl_FragColor = vec4(color, 1.0);
+}`;
+
+const VERT = `
+attribute vec2 a_position;
+void main() {
+  gl_Position = vec4(a_position, 0.0, 1.0);
+}`;
+
+function initGL(canvas, variant) {
+  const gl = canvas.getContext('webgl', { alpha: true, premultipliedAlpha: false });
+  if (!gl) return null;
+
+  function compile(src, type) {
+    const s = gl.createShader(type);
+    gl.shaderSource(s, src);
+    gl.compileShader(s);
+    if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) {
+      console.error(gl.getShaderInfoLog(s));
+      return null;
+    }
+    return s;
+  }
+
+  const vs = compile(VERT, gl.VERTEX_SHADER);
+  const fs = compile(FRAG, gl.FRAGMENT_SHADER);
+  const prog = gl.createProgram();
+  gl.attachShader(prog, vs);
+  gl.attachShader(prog, fs);
+  gl.linkProgram(prog);
+  gl.useProgram(prog);
+
+  const buf = gl.createBuffer();
+  gl.bindBuffer(gl.ARRAY_BUFFER, buf);
+  gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([
+    -1,-1, 1,-1, -1,1,
+    -1,1, 1,-1, 1,1
+  ]), gl.STATIC_DRAW);
+
+  const aPos = gl.getAttribLocation(prog, 'a_position');
+  gl.enableVertexAttribArray(aPos);
+  gl.vertexAttribPointer(aPos, 2, gl.FLOAT, false, 0, 0);
+
+  return {
+    gl,
+    uTime: gl.getUniformLocation(prog, 'u_time'),
+    uRes: gl.getUniformLocation(prog, 'u_resolution'),
+    uVariant: gl.getUniformLocation(prog, 'u_variant'),
+    variant
+  };
+}
+
+function resizeCanvas(canvas) {
+  const rect = canvas.parentElement.getBoundingClientRect();
+  const dpr = Math.min(window.devicePixelRatio, 2);
+  canvas.width = rect.width * dpr;
+  canvas.height = rect.height * dpr;
+}
+
+// Initialize all shader canvases
+const contexts = [];
+
+function setup() {
+  const pairs = [
+    ['main-shader', 0],
+    ['d1-shader', 1],
+    ['d2-shader', 2],
+    ['bridge-shader', 3]
+  ];
+
+  for (const [id, variant] of pairs) {
+    const canvas = document.getElementById(id);
+    resizeCanvas(canvas);
+    const ctx = initGL(canvas, variant);
+    if (ctx) {
+      ctx.canvas = canvas;
+      contexts.push(ctx);
+    }
+  }
+}
+
+function frame(t) {
+  const time = t * 0.001;
+  for (const ctx of contexts) {
+    resizeCanvas(ctx.canvas);
+    ctx.gl.viewport(0, 0, ctx.canvas.width, ctx.canvas.height);
+    ctx.gl.uniform1f(ctx.uTime, time);
+    ctx.gl.uniform2f(ctx.uRes, ctx.canvas.width, ctx.canvas.height);
+    ctx.gl.uniform1f(ctx.uVariant, ctx.variant);
+    ctx.gl.drawArrays(ctx.gl.TRIANGLES, 0, 6);
+  }
+  requestAnimationFrame(frame);
+}
+
+setup();
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>

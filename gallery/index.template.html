@@ -1,0 +1,209 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Lab — Autonomous Experiment Engine</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: "SF Mono", "Fira Code", "Consolas", monospace;
+    background: #0a0a0a;
+    color: #e0e0e0;
+    min-height: 100vh;
+  }
+  header {
+    padding: 2rem;
+    border-bottom: 1px solid #222;
+  }
+  header h1 {
+    font-size: 1.4rem;
+    font-weight: 400;
+    color: #888;
+  }
+  header h1 span { color: #fff; }
+  header p {
+    margin-top: 0.5rem;
+    font-size: 0.8rem;
+    color: #555;
+  }
+  .stats {
+    display: flex;
+    gap: 2rem;
+    margin-top: 1rem;
+    font-size: 0.75rem;
+    color: #666;
+  }
+  .stats .num { color: #aaa; }
+  .controls {
+    padding: 1rem 2rem;
+    display: flex;
+    gap: 1rem;
+    border-bottom: 1px solid #1a1a1a;
+  }
+  .controls button {
+    background: none;
+    border: 1px solid #333;
+    color: #888;
+    padding: 0.3rem 0.8rem;
+    font-family: inherit;
+    font-size: 0.75rem;
+    cursor: pointer;
+    border-radius: 3px;
+  }
+  .controls button.active {
+    border-color: #666;
+    color: #fff;
+  }
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+    gap: 1px;
+    background: #111;
+    padding: 1px;
+  }
+  .card {
+    background: #0a0a0a;
+    overflow: hidden;
+    cursor: pointer;
+    transition: background 0.2s;
+  }
+  .card:hover { background: #111; }
+  .card img {
+    width: 100%;
+    aspect-ratio: 16/9;
+    object-fit: cover;
+    display: block;
+    opacity: 0.85;
+    transition: opacity 0.2s;
+  }
+  .card:hover img { opacity: 1; }
+  .card .info {
+    padding: 0.8rem;
+  }
+  .card .title {
+    font-size: 0.85rem;
+    color: #ccc;
+    margin-bottom: 0.3rem;
+  }
+  .card .hypothesis {
+    font-size: 0.7rem;
+    color: #555;
+    font-style: italic;
+  }
+  .card .meta {
+    display: flex;
+    gap: 1rem;
+    margin-top: 0.5rem;
+    font-size: 0.65rem;
+    color: #444;
+  }
+  .card .score {
+    color: #7a7;
+  }
+  .empty {
+    padding: 4rem 2rem;
+    text-align: center;
+    color: #333;
+    font-size: 0.85rem;
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <h1><span>lab</span> — autonomous experiment engine</h1>
+  <p>agents create, evaluate, and evolve interactive browser experiments</p>
+  <div class="stats">
+    <span><span class="num" id="total">0</span> experiments</span>
+    <span><span class="num" id="alive">0</span> alive</span>
+    <span><span class="num" id="dead">0</span> dead</span>
+    <span>gen <span class="num" id="maxgen">0</span></span>
+  </div>
+</header>
+
+<div class="controls">
+  <button class="active" data-sort="newest">newest</button>
+  <button data-sort="score">highest scored</button>
+  <button data-sort="generation">by generation</button>
+  <button data-filter="graveyard">graveyard</button>
+</div>
+
+<div class="grid" id="grid"></div>
+<div class="empty" id="empty" style="display:none">No experiments yet. The lab is warming up.</div>
+
+<script>
+const experiments = /*EXPERIMENTS_DATA*/[];
+
+let currentSort = "newest";
+let showGraveyard = false;
+
+function render() {
+  const grid = document.getElementById("grid");
+  const empty = document.getElementById("empty");
+
+  let filtered = experiments.filter(e =>
+    showGraveyard ? e.status === "dead" : e.status !== "dead"
+  );
+
+  if (currentSort === "newest") {
+    filtered.sort((a, b) => new Date(b.born_at).getTime() - new Date(a.born_at).getTime());
+  } else if (currentSort === "score") {
+    filtered.sort((a, b) => (b.score ?? -1) - (a.score ?? -1));
+  } else if (currentSort === "generation") {
+    filtered.sort((a, b) => b.generation - a.generation);
+  }
+
+  if (filtered.length === 0) {
+    grid.style.display = "none";
+    empty.style.display = "block";
+    empty.textContent = showGraveyard
+      ? "No dead experiments yet."
+      : "No experiments yet. The lab is warming up.";
+    return;
+  }
+
+  grid.style.display = "grid";
+  empty.style.display = "none";
+
+  grid.innerHTML = filtered.map(e => `
+    <div class="card" onclick="window.open('experiments/${e.id}.html', '_blank')">
+      <img src="thumbs/${e.id}.png" alt="${e.title}" onerror="this.style.background='#111';this.style.minHeight='180px'">
+      <div class="info">
+        <div class="title">${e.title}</div>
+        <div class="hypothesis">${e.hypothesis}</div>
+        <div class="meta">
+          <span class="score">${e.score !== null ? '&#9733; ' + e.score.toFixed(1) : 'unscored'}</span>
+          <span>gen ${e.generation}</span>
+          <span>${e.status}</span>
+          <span>${new Date(e.born_at).toLocaleDateString()}</span>
+        </div>
+      </div>
+    </div>
+  `).join("");
+
+  // Stats
+  document.getElementById("total").textContent = experiments.length;
+  document.getElementById("alive").textContent = experiments.filter(e => e.status !== "dead").length;
+  document.getElementById("dead").textContent = experiments.filter(e => e.status === "dead").length;
+  document.getElementById("maxgen").textContent = Math.max(0, ...experiments.map(e => e.generation));
+}
+
+document.querySelectorAll(".controls button").forEach(btn => {
+  btn.addEventListener("click", () => {
+    if (btn.dataset.filter === "graveyard") {
+      showGraveyard = !showGraveyard;
+      btn.classList.toggle("active", showGraveyard);
+    } else {
+      currentSort = btn.dataset.sort;
+      document.querySelectorAll("[data-sort]").forEach(b => b.classList.remove("active"));
+      btn.classList.add("active");
+    }
+    render();
+  });
+});
+
+render();
+</script>
+</body>
+</html>

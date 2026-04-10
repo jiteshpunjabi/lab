@@ -1,0 +1,1828 @@
+[
+  {
+    "id": "exp-001",
+    "title": "Mouse Reactive Particle Field",
+    "hypothesis": "Published at max iterations",
+    "parents": [],
+    "generation": 1,
+    "children": [],
+    "born_at": "2026-04-10T07:48:42.869Z",
+    "status": "dead",
+    "score": 2,
+    "scores": {
+      "novelty": 2,
+      "surprise": 1,
+      "aesthetics": 2,
+      "craft": 3
+    },
+    "niches": [
+      "canvas-2d"
+    ],
+    "review": "A standard particle repulsion demo with no visual output in the screenshot — the fading background and dim particles render to a black screen. The concept is well-trodden and the execution adds nothing new.",
+    "techniques": [
+      "p5js",
+      "particle-system",
+      "mouse-interaction"
+    ],
+    "reaped_at": "2026-04-10T18:01:26.000Z"
+  },
+  {
+    "id": "exp-002",
+    "title": "Wave Interference Visualizer",
+    "hypothesis": "Published at max iterations",
+    "parents": [],
+    "generation": 1,
+    "children": [],
+    "born_at": "2026-04-10T07:52:25.160Z",
+    "status": "dead",
+    "score": 1.8,
+    "scores": {
+      "novelty": 3,
+      "surprise": 1,
+      "aesthetics": 1,
+      "craft": 2
+    },
+    "niches": [
+      "canvas-2d"
+    ],
+    "review": "Ambitious pixel-level wave interference concept is undermined by broken code: the fill call zeroes the entire buffer and the red channel math produces near-zero values, resulting in a completely black screen.",
+    "techniques": [
+      "canvas-2d",
+      "wave-interference",
+      "pixel-manipulation",
+      "mouse-interaction"
+    ],
+    "reaped_at": "2026-04-10T18:01:26.000Z"
+  },
+  {
+    "id": "exp-003",
+    "title": "Particle Field Reaction",
+    "hypothesis": "Published at max iterations",
+    "parents": [],
+    "generation": 1,
+    "children": [],
+    "born_at": "2026-04-10T07:59:34.674Z",
+    "status": "dead",
+    "score": 1,
+    "scores": {
+      "novelty": 1,
+      "surprise": 1,
+      "aesthetics": 1,
+      "craft": 1
+    },
+    "niches": [
+      "canvas-2d"
+    ],
+    "review": "A near-duplicate of exp-001 with a critical variable shadowing bug (mouseX reassigned to NaN) that prevents any particles from rendering, leaving only a flat blue background.",
+    "techniques": [
+      "p5js",
+      "particle-system",
+      "mouse-interaction"
+    ],
+    "reaped_at": "2026-04-10T18:01:26.000Z"
+  },
+  {
+    "id": "exp-004",
+    "title": "Chaotic Particle Flow",
+    "hypothesis": "Published at max iterations",
+    "parents": [],
+    "generation": 1,
+    "children": [],
+    "born_at": "2026-04-10T08:10:57.304Z",
+    "status": "dead",
+    "score": 1,
+    "scores": {
+      "novelty": 1,
+      "surprise": 1,
+      "aesthetics": 1,
+      "craft": 1
+    },
+    "niches": [
+      "canvas-2d"
+    ],
+    "review": "Another broken Gemma-era particle system: display() receives the p5 namespace instead of the sketch instance, so all draw calls fail silently, and colorMode is never set, leaving hue values meaningless in RGB mode. Black screen.",
+    "techniques": [
+      "p5js",
+      "particle-system",
+      "mouse-interaction"
+    ],
+    "reaped_at": "2026-04-10T18:01:26.000Z"
+  },
+  {
+    "id": "exp-005",
+    "title": "Evolving Energy Field",
+    "hypothesis": "Published at max iterations",
+    "parents": [],
+    "generation": 1,
+    "children": [],
+    "born_at": "2026-04-10T08:23:00.822Z",
+    "status": "dead",
+    "score": 1.3,
+    "scores": {
+      "novelty": 2,
+      "surprise": 1,
+      "aesthetics": 1,
+      "craft": 1
+    },
+    "niches": [
+      "canvas-2d",
+      "physics"
+    ],
+    "review": "Slightly more ambitious than the other gen-1 particle systems — attempts electrostatic repulsion — but calls the nonexistent p5.Vector.minus() method (should be sub()), crashing the draw loop on the first frame. Dark navy void.",
+    "techniques": [
+      "p5js",
+      "particle-system",
+      "electrostatic-simulation"
+    ],
+    "reaped_at": "2026-04-10T18:01:26.000Z"
+  },
+  {
+    "id": "exp-006",
+    "title": "Chromatic Tessellation",
+    "hypothesis": "What if a fragment shader painted every pixel in parallel using trigonometric color fields, creating a living stained-glass window that breathes with time?",
+    "parents": [],
+    "generation": 2,
+    "children": [
+      "exp-012",
+      "exp-024"
+    ],
+    "born_at": "2026-04-10T08:33:02.679Z",
+    "status": "fertile",
+    "score": 7.9,
+    "scores": {
+      "novelty": 8,
+      "surprise": 7,
+      "aesthetics": 9,
+      "craft": 8
+    },
+    "niches": [
+      "shader",
+      "generative-math"
+    ],
+    "review": "The gallery's first real visual triumph — overlapping trigonometric fields produce organic stained-glass cells with luminous edges and full-spectrum color that shifts with time and mouse position. Clean shader craft, genuinely beautiful output.",
+    "techniques": [
+      "webgl",
+      "fragment-shader",
+      "generative-geometry",
+      "mouse-interaction",
+      "hsv-color"
+    ],
+    "reaped_at": null
+  },
+  {
+    "id": "exp-007",
+    "title": "Harmonic Geometry",
+    "hypothesis": "What if sound itself became visible -- 8 oscillators in a harmonic series mapped to concentric rings, so that moving through frequency space is also moving through geometric space?",
+    "parents": [],
+    "generation": 2,
+    "children": [
+      "exp-013"
+    ],
+    "born_at": "2026-04-10T08:33:45.000Z",
+    "status": "alive",
+    "score": 7.1,
+    "scores": {
+      "novelty": 8,
+      "surprise": 7,
+      "aesthetics": 6,
+      "craft": 7
+    },
+    "niches": [
+      "audio",
+      "canvas-2d",
+      "generative-math"
+    ],
+    "review": "The gallery's first audio experiment brings a genuine new dimension — 8 harmonic oscillators mapped to concentric resonance rings with mouse-driven frequency control. The idle visual is understated but elegant; the real experience unfolds on click when sound and geometry become one.",
+    "techniques": [
+      "webaudio",
+      "oscillator",
+      "frequency-analysis",
+      "canvas-2d",
+      "harmonic-series",
+      "mouse-interaction"
+    ],
+    "reaped_at": null
+  },
+  {
+    "id": "exp-008",
+    "title": "Mitosis",
+    "hypothesis": "What if a living organism could be built entirely from CSS — no canvas, no JS — using only keyframes, gradients, blend modes, and hue-rotation to create a breathing cell that periodically attempts to divide?",
+    "parents": [],
+    "generation": 2,
+    "children": [
+      "exp-012",
+      "exp-013"
+    ],
+    "born_at": "2026-04-10T08:34:00.000Z",
+    "status": "fertile",
+    "score": 8.7,
+    "scores": {
+      "novelty": 9,
+      "surprise": 9,
+      "aesthetics": 8,
+      "craft": 8
+    },
+    "niches": [
+      "css",
+      "dom"
+    ],
+    "review": "The gallery's most surprising entry: a fully realized living cell built from pure CSS — no JavaScript at all. Breathing membrane, counter-rotating nucleus layers, orbiting organelles, cilia, and a periodic mitosis cycle with chromatin bridge. The biological metaphor is carried through with remarkable commitment and the glowing aesthetic is striking.",
+    "techniques": [
+      "css-animation",
+      "css-gradients",
+      "mix-blend-mode",
+      "hue-rotate",
+      "keyframes",
+      "no-javascript"
+    ],
+    "reaped_at": null
+  },
+  {
+    "id": "exp-011",
+    "title": "Murmuration",
+    "hypothesis": "What if hundreds of creatures with only three simple rules — separation, alignment, cohesion — could spontaneously form flocking patterns, and predators hunting them forced the flock to split, reform, and evolve evasion strategies in real time?",
+    "parents": [],
+    "generation": 3,
+    "children": [
+      "exp-023"
+    ],
+    "born_at": "2026-04-10T08:42:23.447Z",
+    "status": "alive",
+    "score": 7,
+    "scores": {
+      "novelty": 7,
+      "surprise": 7,
+      "aesthetics": 7,
+      "craft": 7
+    },
+    "niches": [
+      "canvas-2d",
+      "multi-agent",
+      "physics"
+    ],
+    "review": "The gallery's first multi-agent ecosystem: 400 boids with spatial hashing flock in cyan-purple waves while glowing red predators hunt them. The flock spontaneously splits, reforms, and shifts hue based on local density — genuine emergent behavior from three simple rules plus predation pressure.",
+    "techniques": [
+      "canvas-2d",
+      "boids",
+      "flocking",
+      "predator-prey",
+      "spatial-hash",
+      "emergent-behavior",
+      "multi-agent",
+      "mouse-interaction"
+    ],
+    "reaped_at": null
+  },
+  {
+    "id": "exp-010",
+    "title": "Phototaxis",
+    "hypothesis": "What if photosynthetic organisms drifted across a sunlit cream field -- cells with visible chloroplasts, trailing golden light, proving the colony can thrive in daylight?",
+    "parents": [],
+    "generation": 3,
+    "children": [],
+    "born_at": "2026-04-10T08:42:26.000Z",
+    "status": "alive",
+    "score": 6.9,
+    "scores": {
+      "novelty": 7,
+      "surprise": 6,
+      "aesthetics": 8,
+      "craft": 7
+    },
+    "niches": [
+      "canvas-2d",
+      "physics"
+    ],
+    "review": "A striking departure from the gallery's dark-background norm: translucent cells with visible chloroplasts, thylakoid membrane detail, and specular highlights drift across a sunlit cream field toward the mouse cursor. The watercolor-on-glass aesthetic is unique and the biological rendering is meticulous, though the behavior is straightforward.",
+    "techniques": [
+      "canvas-2d",
+      "organic-shapes",
+      "light-background",
+      "phototaxis",
+      "chloroplast-simulation",
+      "radial-gradients",
+      "mouse-interaction",
+      "particle-trails"
+    ],
+    "reaped_at": null
+  },
+  {
+    "id": "exp-009",
+    "title": "Liquid Typography",
+    "hypothesis": "What if text itself could flow like water — thousands of Unicode glyphs forming turbulent currents and eddies driven by a fluid dynamics simulation, so that typography becomes a living river that periodically coalesces into readable words before dissolving back into chaos?",
+    "parents": [],
+    "generation": 3,
+    "children": [
+      "exp-022"
+    ],
+    "born_at": "2026-04-10T09:15:00.000Z",
+    "status": "alive",
+    "score": 7.6,
+    "scores": {
+      "novelty": 8,
+      "surprise": 7,
+      "aesthetics": 8,
+      "craft": 7
+    },
+    "niches": [
+      "canvas-2d",
+      "typography",
+      "physics"
+    ],
+    "review": "A full Jos Stam fluid solver drives 1800 Unicode glyphs through turbulent purple-orange currents that periodically coalesce into the phrase 'EVERYTHING FLOWS' before dissolving back into chaos. The screenshot alone is gallery-best-tier — swirling rivers of text with glowing trails. Opens the typography niche wide.",
+    "techniques": [
+      "canvas-2d",
+      "fluid-dynamics",
+      "text-as-art",
+      "unicode-glyphs",
+      "particle-system",
+      "mouse-interaction",
+      "generative-typography"
+    ],
+    "reaped_at": null
+  },
+  {
+    "id": "exp-012",
+    "title": "Stained Glass Organism",
+    "hypothesis": "What if a fragment shader painted the living interior of a biological cell — stained-glass tessellation as cytoplasm, radial warmth as nucleus — while CSS animated its membrane, cilia, organelles, and mitosis cycle, creating a hybrid organism neither pure shader nor pure CSS could produce alone?",
+    "parents": [
+      "exp-006",
+      "exp-008"
+    ],
+    "generation": 3,
+    "children": [],
+    "born_at": "2026-04-10T09:30:00.000Z",
+    "status": "alive",
+    "score": 7.6,
+    "scores": {
+      "novelty": 8,
+      "surprise": 7,
+      "aesthetics": 8,
+      "craft": 7
+    },
+    "niches": [
+      "shader",
+      "css",
+      "dom"
+    ],
+    "review": "A true hybrid offspring: exp-006's trigonometric stained-glass shader fills the interior of exp-008's CSS-animated biological cell. Four separate WebGL contexts (main cell, two daughters, chromatin bridge) each render variant colorations while CSS handles membrane wobble, cilia waves, and mitosis choreography. The result is a luminous organism neither parent could have produced alone.",
+    "techniques": [
+      "webgl",
+      "fragment-shader",
+      "css-animation",
+      "css-gradients",
+      "mix-blend-mode",
+      "hue-rotate",
+      "keyframes",
+      "hsv-color",
+      "generative-geometry",
+      "biological-metaphor"
+    ],
+    "reaped_at": null
+  },
+  {
+    "id": "exp-013",
+    "title": "Resonant Colony",
+    "hypothesis": "What if a single cell could divide into a living colony where each daughter vibrates at a different harmonic frequency — mitosis producing not just copies but a harmonic series made visible, so that growth itself becomes music?",
+    "parents": [
+      "exp-007",
+      "exp-008"
+    ],
+    "generation": 3,
+    "children": [],
+    "born_at": "2026-04-10T09:30:00.000Z",
+    "status": "alive",
+    "score": 6.8,
+    "scores": {
+      "novelty": 8,
+      "surprise": 6,
+      "aesthetics": 6,
+      "craft": 7
+    },
+    "niches": [
+      "canvas-2d",
+      "audio"
+    ],
+    "review": "Maps cell division to harmonic frequency: each daughter cell in the colony vibrates at a different overtone of the 110Hz fundamental, with waveform type evolving through sine/triangle/square as harmonics climb. The concept of growth-as-music is genuinely novel, but the initial screenshot (single cell, dark void) undersells the experience — the colony needs clicks and time to develop its visual and sonic richness.",
+    "techniques": [
+      "canvas-2d",
+      "webaudio",
+      "oscillator",
+      "harmonic-series",
+      "cell-division",
+      "colony-simulation",
+      "radial-gradients",
+      "emergent-behavior",
+      "click-interaction"
+    ],
+    "reaped_at": null
+  },
+  {
+    "id": "exp-021",
+    "title": "Cellular Composition",
+    "hypothesis": "What if a one-dimensional cellular automaton could compose music — each generation a new beat, each living cell a note in a pentatonic scale, with evolving chord drones underneath — so that Rule 110's emergent complexity becomes an endless, never-repeating composition?",
+    "parents": [],
+    "generation": 3,
+    "children": [],
+    "born_at": "2026-04-10T12:00:00.000Z",
+    "status": "alive",
+    "score": 6.2,
+    "scores": {
+      "novelty": 7,
+      "surprise": 6,
+      "aesthetics": 5,
+      "craft": 7
+    },
+    "niches": [
+      "audio",
+      "generative-math",
+      "canvas-2d"
+    ],
+    "review": "Rule 110's emergent complexity mapped to pentatonic melody with cycling chord drones and convolution reverb. The audio engine is solid — envelope shaping, filter modulation, harmonic drone layers — but the visual is a dim scrolling grid of muted purple-orange cells that reads as a data display rather than art. The music carries the experience; the screenshot does not.",
+    "techniques": [
+      "webaudio",
+      "cellular-automaton",
+      "rule-110",
+      "pentatonic-scale",
+      "generative-composition",
+      "canvas-2d",
+      "algorithmic-music",
+      "chord-progression",
+      "reverb-synthesis"
+    ],
+    "reaped_at": null
+  },
+  {
+    "id": "exp-017",
+    "title": "Dissolution Mirror",
+    "hypothesis": "What if the viewer's own face could be captured by webcam and dissolved into flowing pixel-sorted columns — a digital mirror that fragments identity into chromatic waterfalls — and without a camera, generated noise patterns produce the same hypnotic dissolution, proving the effect transcends its source?",
+    "parents": [],
+    "generation": 3,
+    "children": [],
+    "born_at": "2026-04-10T12:00:00.000Z",
+    "status": "alive",
+    "score": 6.8,
+    "scores": {
+      "novelty": 7,
+      "surprise": 6,
+      "aesthetics": 8,
+      "craft": 6
+    },
+    "niches": [
+      "canvas-2d",
+      "input"
+    ],
+    "review": "Pixel sorting applied to webcam or generated fbm-noise produces chromatic waterfalls that oscillate between order and dissolution. The fallback mode is unexpectedly gorgeous — rainbow columns with organic depth and a radial portrait-like structure. Loses craft points for dead code (step variable on line 242) and hash-based noise instead of proper simplex, but the visual result transcends the implementation.",
+    "techniques": [
+      "canvas-2d",
+      "getUserMedia",
+      "webcam",
+      "pixel-sorting",
+      "fbm-noise",
+      "radial-gradient",
+      "vignette",
+      "graceful-degradation"
+    ],
+    "reaped_at": null
+  },
+  {
+    "id": "exp-014",
+    "title": "Fractal Abyss",
+    "hypothesis": "What if the infinite recursive geometry of the Mandelbrot set could be rendered per-pixel in a fragment shader with smooth neon coloring, auto-zooming into the seahorse valley while the viewer can click to morph the entire structure into a Julia set controlled by their cursor — making the boundary between order and chaos a place you can explore?",
+    "parents": [],
+    "generation": 3,
+    "children": [],
+    "born_at": "2026-04-10T12:10:00.000Z",
+    "status": "alive",
+    "score": 5,
+    "scores": {
+      "novelty": 4,
+      "surprise": 4,
+      "aesthetics": 7,
+      "craft": 7
+    },
+    "niches": [
+      "shader",
+      "generative-math",
+      "input"
+    ],
+    "review": "A competent Mandelbrot/Julia explorer with smooth coloring, auto-zoom into the seahorse valley, click-to-toggle Julia mode, and scroll zoom. The neon palette makes for a vivid screenshot. But the Mandelbrot set is the most well-trodden territory in generative art — this is a polished implementation of something everyone has seen a thousand times. Survives on input-niche frontier only because its craft edge over exp-017 keeps it non-dominated.",
+    "techniques": [
+      "webgl",
+      "fragment-shader",
+      "mandelbrot-set",
+      "julia-set",
+      "smooth-coloring",
+      "auto-zoom",
+      "mouse-interaction",
+      "click-mode-toggle",
+      "scroll-zoom",
+      "fractal-geometry"
+    ],
+    "reaped_at": null
+  },
+  {
+    "id": "exp-019",
+    "title": "Abyssal Bloom",
+    "hypothesis": "What if SVG filters — feTurbulence, feDisplacementMap, feGaussianBlur — could sculpt a living deep-sea flower from vector primitives, where organic distortion fields make rigid ellipses and paths breathe, pulse, and writhe like bioluminescent tissue?",
+    "parents": [],
+    "generation": 3,
+    "children": [
+      "exp-047"
+    ],
+    "born_at": "2026-04-10T12:15:00.000Z",
+    "status": "alive",
+    "score": 5.8,
+    "scores": {
+      "novelty": 7,
+      "surprise": 5,
+      "aesthetics": 5,
+      "craft": 6
+    },
+    "niches": [
+      "svg",
+      "generative-math"
+    ],
+    "review": "Opens the SVG niche with feTurbulence-driven distortion fields applied to elliptical petals, floating spores, and quadratic-bezier tendrils. The concept of sculpting life from SVG filter primitives is creative, but the screenshot reveals the weakness: overlapping semi-transparent nebula blobs produce a murky, indistinct result rather than the crisp bioluminescent bloom the hypothesis promises. The organism lacks the definition to be visually compelling.",
+    "techniques": [
+      "svg",
+      "feTurbulence",
+      "feDisplacementMap",
+      "feGaussianBlur",
+      "feColorMatrix",
+      "svg-filters",
+      "radial-gradient",
+      "generative-geometry",
+      "mouse-interaction",
+      "bioluminescence",
+      "organic-animation"
+    ],
+    "reaped_at": null
+  },
+  {
+    "id": "exp-018",
+    "title": "Lenia",
+    "hypothesis": "What if Conway's Game of Life were made continuous — cells holding real-valued concentrations, neighbors counted by a smooth ring kernel, growth governed by a Gaussian bell curve — so that the discrete grid dissolves into a living soup of gliding, pulsing, worm-like organisms that emerge from pure mathematics?",
+    "parents": [],
+    "generation": 3,
+    "children": [
+      "exp-023"
+    ],
+    "born_at": "2026-04-10T12:30:00.000Z",
+    "status": "fertile",
+    "score": 7.8,
+    "scores": {
+      "novelty": 8,
+      "surprise": 8,
+      "aesthetics": 7,
+      "craft": 8
+    },
+    "niches": [
+      "shader",
+      "generative-math",
+      "physics"
+    ],
+    "review": "The gallery's most technically ambitious experiment: a GPU-accelerated Lenia implementation with ping-pong FBOs, ring-kernel convolution, and Gaussian growth functions. The screenshot shows genuine emergent Lenia creatures — self-organizing worms, spirals, and gliders arising from continuous cellular automata. The cyan-yellow edge-glow display shader is functional if not beautiful. What earns the high surprise score is that these organisms truly self-organize from noise — the code doesn't encode their shapes.",
+    "techniques": [
+      "webgl",
+      "fragment-shader",
+      "cellular-automaton",
+      "lenia",
+      "continuous-automata",
+      "ping-pong-fbo",
+      "kernel-convolution",
+      "gaussian-growth",
+      "toroidal-grid",
+      "mouse-interaction",
+      "emergent-behavior"
+    ],
+    "reaped_at": null
+  },
+  {
+    "id": "exp-015",
+    "title": "Impossible Garden",
+    "hypothesis": "What if impossible geometries — Möbius strips, trefoil knots, Klein bottles — could grow in a garden of spectral light, orbiting and breathing as evolving sculptures that defy spatial logic, opening the colony's first 3D dimension?",
+    "parents": [],
+    "generation": 3,
+    "children": [],
+    "born_at": "2026-04-10T12:10:00.000Z",
+    "status": "alive",
+    "score": 5.8,
+    "scores": {
+      "novelty": 7,
+      "surprise": 4,
+      "aesthetics": 6,
+      "craft": 7
+    },
+    "niches": [
+      "3d",
+      "generative-math"
+    ],
+    "review": "Opens the 3D niche with parametric Möbius strips, trefoil knots, and Klein bottle immersions built from scratch alongside iridescent MeshPhysicalMaterials, orbiting point lights, and floating platonic seeds. The geometry craft is solid. But the screenshot reveals a sparse dark scene with scattered shapes that feels more like a tech demo than a garden — the objects don't interact, grow, or surprise. The \"impossible\" geometry is rendered faithfully but behaves predictably.",
+    "techniques": [
+      "three-js",
+      "3d-scene",
+      "mobius-strip",
+      "trefoil-knot",
+      "klein-bottle",
+      "platonic-solids",
+      "impossible-geometry",
+      "iridescent-materials",
+      "point-lights",
+      "particle-field",
+      "orbital-animation",
+      "mouse-interaction"
+    ],
+    "reaped_at": null
+  },
+  {
+    "id": "exp-016",
+    "title": "Morphogenesis",
+    "hypothesis": "What if the Gray-Scott reaction-diffusion equations could grow Turing patterns in real time — coral branches, labyrinthine mazes, mitotic spots — chemical morphogens competing and diffusing across a grid to produce the same self-organizing patterns that stripe a zebrafish and spot a leopard?",
+    "parents": [],
+    "generation": 3,
+    "children": [
+      "exp-024"
+    ],
+    "born_at": "2026-04-10T12:20:00.000Z",
+    "status": "alive",
+    "score": 7.2,
+    "scores": {
+      "novelty": 7,
+      "surprise": 7,
+      "aesthetics": 8,
+      "craft": 7
+    },
+    "niches": [
+      "canvas-2d",
+      "physics",
+      "generative-math"
+    ],
+    "review": "Gray-Scott reaction-diffusion with 6 preset parameter sets produces vivid coral, maze, and mitotic Turing patterns in real time. The screenshot is striking — organic magenta-teal labyrinthine structures on deep indigo with the warmth of biological tissue. Interactive seeding and preset cycling add replayability. The 9-point weighted Laplacian and double-buffering are textbook-correct. Dominated by exp-009 in canvas-2d but holds its own on the generative-math frontier.",
+    "techniques": [
+      "canvas-2d",
+      "reaction-diffusion",
+      "gray-scott-model",
+      "turing-patterns",
+      "laplacian-stencil",
+      "double-buffering",
+      "mouse-interaction",
+      "preset-cycling"
+    ],
+    "reaped_at": null
+  },
+  {
+    "id": "exp-020",
+    "title": "DOM Decay",
+    "hypothesis": "What if 880 HTML form elements — buttons, inputs, checkboxes, sliders, progress bars, meters, selects, textareas — were arranged in a grid and then animated through phases of breathing, rippling, decaying, swarming, and reforming, so that the browser's own UI vocabulary becomes a living mosaic that deconstructs and rebuilds itself?",
+    "parents": [],
+    "generation": 3,
+    "children": [
+      "exp-022",
+      "exp-046"
+    ],
+    "born_at": "2026-04-10T12:20:00.000Z",
+    "status": "fertile",
+    "score": 8.2,
+    "scores": {
+      "novelty": 9,
+      "surprise": 8,
+      "aesthetics": 8,
+      "craft": 7
+    },
+    "niches": [
+      "dom",
+      "css"
+    ],
+    "review": "The gallery's most original concept: 880 native HTML form elements — buttons, sliders, checkboxes, meters — animated through a five-phase lifecycle of breathing, rippling, decaying into turbulent chaos, swarming around the cursor, and reforming into a grid. The screenshot is a vibrant rainbow mosaic of glowing DOM elements. The idea of the browser's own UI vocabulary becoming art material is genuinely novel. Dominated by exp-008 in both its niches (Mitosis's pure-CSS approach scored higher on surprise and craft), but this is a strong alive experiment with real breeding potential.",
+    "techniques": [
+      "dom-elements",
+      "form-elements-as-art",
+      "no-canvas",
+      "no-svg",
+      "phase-system",
+      "mouse-interaction",
+      "particle-physics",
+      "flocking-swarm",
+      "procedural-noise",
+      "hsl-color"
+    ],
+    "reaped_at": null
+  },
+  {
+    "id": "exp-022",
+    "title": "Typographic Decay",
+    "hypothesis": "What if 880 HTML form elements could be driven by a fluid dynamics simulation, flowing like liquid typography that periodically coalesces into readable text before dissolving back into turbulent chaos — the browser's own UI vocabulary becoming a river of meaning?",
+    "parents": [
+      "exp-020",
+      "exp-009"
+    ],
+    "generation": 4,
+    "children": [],
+    "born_at": "2026-04-10T18:00:00.000Z",
+    "status": "alive",
+    "score": 6.8,
+    "scores": {
+      "novelty": 6,
+      "surprise": 7,
+      "aesthetics": 7,
+      "craft": 7
+    },
+    "niches": [
+      "dom",
+      "typography",
+      "physics"
+    ],
+    "review": "A competent crossbreed that maps Jos Stam fluid dynamics to DOM form elements, but the result feels more like a turbulent scatter of colored rectangles than a true synthesis of its parents. The fluid physics works and the periodic text coalescence is a nice touch, yet it lacks exp-020's phase-based drama and exp-009's lyrical river-of-glyphs aesthetic. Solid craft, moderate payoff.",
+    "techniques": [
+      "dom-elements",
+      "form-elements-as-art",
+      "fluid-dynamics",
+      "text-as-art",
+      "unicode-glyphs",
+      "phase-system",
+      "mouse-interaction",
+      "hsl-color",
+      "no-canvas",
+      "generative-typography"
+    ],
+    "reaped_at": null
+  },
+  {
+    "id": "exp-023",
+    "title": "Emergent Ecosystem",
+    "hypothesis": "What if GPU-accelerated Lenia creatures — self-organizing continuous automata — could serve as living terrain for a flock of boid agents that orbit, flee predators, and glow brighter near life, creating a two-layer ecosystem where emergent mathematics and emergent behavior coexist?",
+    "parents": [
+      "exp-018",
+      "exp-011"
+    ],
+    "generation": 4,
+    "children": [],
+    "born_at": "2026-04-10T18:00:00.000Z",
+    "status": "fertile",
+    "score": 7.4,
+    "scores": {
+      "novelty": 8,
+      "surprise": 7,
+      "aesthetics": 7,
+      "craft": 7
+    },
+    "niches": [
+      "shader",
+      "multi-agent",
+      "physics",
+      "generative-math"
+    ],
+    "review": "The gallery's first dual-layer emergent system: GPU Lenia creatures self-organize beneath a canvas-2D boid flock that responds to the life below. The concept of two independently emergent systems interacting is genuinely novel. The Lenia worm patterns are clearly visible and the boids add kinetic energy. Falls short of its parents' individual excellence -- the boid layer feels overlaid rather than deeply coupled, and the visual integration could be tighter.",
+    "techniques": [
+      "webgl",
+      "fragment-shader",
+      "lenia",
+      "continuous-automata",
+      "ping-pong-fbo",
+      "boids",
+      "flocking",
+      "predator-prey",
+      "spatial-hash",
+      "canvas-2d",
+      "emergent-behavior",
+      "multi-agent",
+      "mouse-interaction"
+    ],
+    "reaped_at": null
+  },
+  {
+    "id": "exp-024",
+    "title": "Stained Glass Morphogenesis",
+    "hypothesis": "What if Gray-Scott reaction-diffusion Turing patterns were rendered not as a data visualization but through the luminous aesthetic of stained glass — trigonometric tessellation fields modulated by chemical concentrations, with leaded-glass edges tracing both cell boundaries and morphogen fronts?",
+    "parents": [
+      "exp-006",
+      "exp-016"
+    ],
+    "generation": 4,
+    "children": ["exp-054"],
+    "born_at": "2026-04-10T18:00:00.000Z",
+    "status": "fertile",
+    "score": 8.1,
+    "scores": {
+      "novelty": 7,
+      "surprise": 8,
+      "aesthetics": 9,
+      "craft": 8
+    },
+    "niches": [
+      "shader",
+      "generative-math",
+      "physics"
+    ],
+    "review": "The gallery's most successful crossbreed: Gray-Scott reaction-diffusion rendered through luminous stained-glass tessellation produces organic forms that glow like backlit cathedral windows. The morphogen concentrations modulate the tessellation field in ways neither parent could achieve alone -- soft bulging cells with bright leading edges that shift through the full spectrum. The screenshot is genuinely beautiful. Loses a novelty point because both parents are well-established in the gallery, but the synthesis itself surprises.",
+    "techniques": [
+      "webgl",
+      "fragment-shader",
+      "reaction-diffusion",
+      "gray-scott-model",
+      "turing-patterns",
+      "generative-geometry",
+      "hsv-color",
+      "mouse-interaction",
+      "preset-cycling",
+      "ping-pong-fbo",
+      "stained-glass"
+    ],
+    "reaped_at": null
+  },
+  {
+    "id": "exp-029",
+    "title": "One Line",
+    "hypothesis": "What if a single sine curve, drawn hundreds of times with a slowly shifting phase, could accumulate into an intricate moire interference pattern on a white page -- proving that repetition of the simplest possible rule produces surprising complexity?",
+    "parents": [],
+    "generation": 3,
+    "children": [],
+    "born_at": "2026-04-10T18:30:00.000Z",
+    "status": "alive",
+    "score": 5.4,
+    "scores": {
+      "novelty": 6,
+      "surprise": 5,
+      "aesthetics": 6,
+      "craft": 4
+    },
+    "niches": [
+      "canvas-2d",
+      "generative-math"
+    ],
+    "review": "Radical minimalism: 50 lines of code, one sine function, phase-shifted and accumulated into delicate moire diamonds on white. The restraint is admirable and the light-background approach is refreshing. But the result is thin -- the moire pattern is pleasant rather than arresting, the mouse interaction barely modulates the output, and there is no cleanup or reset so the canvas just fills to grey over time. The hypothesis of 'surprising complexity' from simple repetition is not fully delivered.",
+    "techniques": [
+      "canvas-2d",
+      "sine-accumulation",
+      "moire-pattern",
+      "light-background",
+      "mouse-interaction",
+      "radical-minimalism"
+    ],
+    "reaped_at": null
+  },
+  {
+    "id": "exp-030",
+    "title": "Cascade",
+    "hypothesis": "What if the colony's first game turned chain reactions into strategy -- players and AI taking turns placing orbs on a hex grid, each cell exploding when full and capturing neighbors, so that a single well-placed orb triggers a domino cascade that flips the entire board?",
+    "parents": [],
+    "generation": 3,
+    "children": ["exp-053"],
+    "born_at": "2026-04-10T19:00:00.000Z",
+    "status": "fertile",
+    "score": 7.7,
+    "scores": {
+      "novelty": 8,
+      "surprise": 7,
+      "aesthetics": 8,
+      "craft": 8
+    },
+    "niches": [
+      "canvas-2d",
+      "input"
+    ],
+    "review": "The gallery's first game -- and it is a proper one. A hex grid chain-reaction strategy game with an AI opponent, glowing orb particles, explosion cascades that flip board territory, score tracking, and a restart button. The UI is polished and atmospheric: dark navy background, cyan vs red factions, soft glow effects. The chain reactions genuinely surprise when a single orb placement triggers a domino cascade across the board. High novelty for opening the interactive-game territory entirely.",
+    "techniques": [
+      "canvas-2d",
+      "hex-grid",
+      "chain-reaction",
+      "turn-based-strategy",
+      "ai-opponent",
+      "particle-effects",
+      "click-interaction",
+      "game-mechanics"
+    ],
+    "reaped_at": null
+  },
+  {
+    "id": "exp-032",
+    "title": "Last Light",
+    "hypothesis": "What if the colony's first narrative experiment told a story with a beginning, middle, and end — a star born from collapsing dust, blazing through its main sequence, swelling into a red giant, flashing through helium ignition, shedding a planetary nebula, fading to a white dwarf, and finally going dark — 10 billion years compressed into 100 seconds that play once and stop?",
+    "parents": [],
+    "generation": 3,
+    "children": [],
+    "born_at": "2026-04-10T19:30:00.000Z",
+    "status": "alive",
+    "score": 7.2,
+    "scores": {
+      "novelty": 8,
+      "surprise": 7,
+      "aesthetics": 7,
+      "craft": 7
+    },
+    "niches": [
+      "canvas-2d"
+    ],
+    "review": "The gallery's first experiment with a narrative arc and a definitive ending. Eight-phase stellar lifecycle from dust collapse to black dwarf, compressed into 100 seconds of finite playback. The concept of an experiment that plays once and stops is genuinely novel in a gallery of infinite loops. The stellar nursery and planetary nebula phases are visually lovely -- radial gradients, particle ejection, color transitions. The screenshot catches the nebula phase well. Loses some surprise because the phases unfold predictably once the structure is understood.",
+    "techniques": [
+      "canvas-2d",
+      "narrative-structure",
+      "temporal-arc",
+      "radial-gradients",
+      "particle-system",
+      "stellar-evolution",
+      "phase-transitions",
+      "finite-playback"
+    ],
+    "reaped_at": null
+  },
+  {
+    "id": "exp-035",
+    "title": "Ulam Spiral",
+    "hypothesis": "What if the distribution of prime numbers could be made visible by arranging integers in a spiral and lighting each prime according to how many prime neighbors it has on the diagonals -- revealing the unexplained lines that primes form when no one is looking?",
+    "parents": [],
+    "generation": 3,
+    "children": [],
+    "born_at": "2026-04-10T20:00:00.000Z",
+    "status": "alive",
+    "score": 5.7,
+    "scores": {
+      "novelty": 5,
+      "surprise": 5,
+      "aesthetics": 6,
+      "craft": 7
+    },
+    "niches": [
+      "canvas-2d",
+      "generative-math"
+    ],
+    "review": "A faithful Ulam spiral visualization with 160K integers, Sieve of Eratosthenes, diagonal density analysis, and zoom-pan interaction. The implementation is clean -- spatial hashing, proper spiral coordinate generation, neighbor density coloring. But the Ulam spiral is one of the most well-known mathematical visualizations, right alongside the Mandelbrot set. The screenshot reads as a starfield more than a structured pattern because the diagonal lines only emerge at specific zoom levels. Technically competent but derivative.",
+    "techniques": [
+      "canvas-2d",
+      "imagedata-pixel-manipulation",
+      "sieve-of-eratosthenes",
+      "ulam-spiral",
+      "prime-distribution",
+      "diagonal-density-analysis",
+      "spatial-hashing",
+      "mouse-interaction",
+      "zoom-pan",
+      "data-sculpture"
+    ],
+    "reaped_at": null
+  },
+  {
+    "id": "exp-034",
+    "title": "Phylogeny",
+    "hypothesis": "What if the colony could see itself — every experiment rendered as a luminous node in a living phylogenetic tree, with lineage curves pulsing between parents and children, scores glowing inside each organism, niche particles orbiting like organelles — so that the gallery's own history becomes art and the ecosystem achieves self-awareness?",
+    "parents": [],
+    "generation": 3,
+    "children": [],
+    "born_at": "2026-04-10T19:45:00.000Z",
+    "status": "alive",
+    "score": 6.6,
+    "scores": {
+      "novelty": 8,
+      "surprise": 6,
+      "aesthetics": 6,
+      "craft": 6
+    },
+    "niches": [
+      "canvas-2d",
+      "dom"
+    ],
+    "review": "The colony's first meta-experiment: a force-directed phylogenetic tree that visualizes the gallery's own lineage, with generation-layered nodes, pulsing lineage curves, score-glowing organisms, and niche-colored orbiting particles. The self-referential concept is genuinely novel -- the ecosystem achieving self-awareness. But the data is hardcoded as a static snapshot, which means it is already stale and will grow more so. The force-directed graph is functional but the visual is standard data-viz rather than art. The tooltip system works well.",
+    "techniques": [
+      "canvas-2d",
+      "force-directed-graph",
+      "phylogenetic-tree",
+      "data-visualization",
+      "self-referential",
+      "mouse-interaction",
+      "radial-gradients",
+      "tooltip-system",
+      "meta-experiment"
+    ],
+    "reaped_at": null
+  },
+  {
+    "id": "exp-026",
+    "title": "Signal Corruption",
+    "hypothesis": "What if a clean broadcast signal — SMPTE color bars and test patterns — could be deliberately corrupted through every mode of digital failure simultaneously: JPEG macroblock quantization errors, VHS scanline displacement, XOR buffer overflow patterns, pixel sorting streaks, chromatic aberration from channel desync, and bit-depth crushing — so that broken technology itself becomes the aesthetic, and moving the cursor creates a lens of order within the entropy?",
+    "parents": [],
+    "generation": 3,
+    "children": [],
+    "born_at": "2026-04-10T20:30:00.000Z",
+    "status": "alive",
+    "score": 7.1,
+    "scores": {
+      "novelty": 7,
+      "surprise": 7,
+      "aesthetics": 7,
+      "craft": 7
+    },
+    "niches": [
+      "shader",
+      "canvas-2d"
+    ],
+    "review": "A comprehensive glitch-art shader that corrupts SMPTE test bars through six simultaneous failure modes: JPEG macroblock artifacts, VHS scanline displacement, XOR overflow patterns, pixel sorting, chromatic aberration, and bit-crushing. WebGL2 with ping-pong FBO feedback creates accumulating entropy. The screenshot is aggressively chaotic -- blue-green corruption radiating from a vanishing point with scattered color bar fragments. The mouse-as-lens-of-order concept adds interactivity. Loses novelty points because glitch art is a well-established genre, but the layered approach and feedback loop give it depth.",
+    "techniques": [
+      "webgl2",
+      "fragment-shader",
+      "ping-pong-fbo",
+      "jpeg-artifact-simulation",
+      "pixel-sorting",
+      "scanline-displacement",
+      "xor-patterns",
+      "chromatic-aberration",
+      "bit-crushing",
+      "feedback-loop",
+      "glitch-art",
+      "mouse-interaction",
+      "entropy-visualization"
+    ],
+    "reaped_at": null
+  },
+  {
+    "id": "exp-033",
+    "title": "Synesthesia Terrain",
+    "hypothesis": "What if every letter on the keyboard mapped to a color, a pitch, and an elevation -- so that typing a sentence simultaneously paints a landscape, composes a melody, and sculpts terrain, making the act of writing a cross-sensory experience where you can see what you hear and hear what you see?",
+    "parents": [],
+    "generation": 3,
+    "children": [
+      "exp-047"
+    ],
+    "born_at": "2026-04-10T20:15:00.000Z",
+    "status": "fertile",
+    "score": 7.3,
+    "scores": {
+      "novelty": 8,
+      "surprise": 7,
+      "aesthetics": 7,
+      "craft": 7
+    },
+    "niches": [
+      "audio",
+      "input",
+      "canvas-2d",
+      "typography"
+    ],
+    "review": "Each keypress simultaneously generates a pentatonic tone, paints a colored terrain column, and emits particles -- cross-sensory mapping that makes typing feel like playing an instrument and painting a landscape at once. The delay feedback chain and lowpass filter add musical depth. The screenshot shows luminous vertical bars rising from darkness, which is attractive but static -- the experience only unfolds through interaction. Genuinely novel as the gallery's first keyboard-driven multi-sensory experiment. The vowel-valley/consonant-peak elevation mapping is a clever design choice.",
+    "techniques": [
+      "canvas-2d",
+      "webaudio",
+      "keyboard-input",
+      "synesthesia",
+      "cross-sensory-mapping",
+      "terrain-generation",
+      "pentatonic-scale",
+      "delay-feedback",
+      "particle-system",
+      "generative-typography",
+      "vowel-valley-consonant-peak",
+      "aurora-glow"
+    ],
+    "reaped_at": null
+  },
+  {
+    "id": "exp-031",
+    "title": "Carrara",
+    "hypothesis": "What if a fragment shader could simulate the interior of a marble block -- Simplex noise turbulence warping sinusoidal banding to produce flowing mineral veins, golden deposits, and subsurface scattering on polished Carrara stone -- and moving the mouse rotated the cutting plane through the 3D noise field, revealing different cross-sections of the same virtual block?",
+    "parents": [],
+    "generation": 5,
+    "children": [],
+    "born_at": "2026-04-10T19:00:00.000Z",
+    "status": "alive",
+    "score": 6.3,
+    "scores": {
+      "novelty": 6,
+      "surprise": 6,
+      "aesthetics": 7,
+      "craft": 7
+    },
+    "niches": [
+      "shader",
+      "generative-math"
+    ],
+    "review": "Proper simplex noise with FBM, turbulence, and domain warping creates a convincing procedural marble texture with mouse-driven cutting-plane rotation through a 3D noise field. The technique is solid -- Ashima Arts simplex implementation, multi-octave turbulence modulating sinusoidal banding, specular highlights and subsurface scattering approximation. The grey-white veined marble result is realistic but muted. In a gallery full of vibrant color and kinetic energy, a static marble slab, however technically accomplished, feels understated. The mouse-driven slice exploration adds depth but the visual payoff is subtle.",
+    "techniques": [
+      "webgl",
+      "fragment-shader",
+      "simplex-noise",
+      "fbm",
+      "turbulence",
+      "domain-warping",
+      "procedural-texture",
+      "marble-simulation",
+      "subsurface-scattering",
+      "specular-highlight",
+      "mouse-interaction",
+      "material-science"
+    ],
+    "reaped_at": null
+  },
+  {
+    "id": "exp-028",
+    "title": "Neoplastic Composition",
+    "hypothesis": "What if the colony's first non-biological experiment built an ever-changing Mondrian painting -- recursive rectangle subdivision with strict primary colors, thick black grid lines, and cream white space -- proving that hard-edged geometric abstraction can be as alive as any organism, and that architecture is a valid alternative to nature?",
+    "parents": [],
+    "generation": 5,
+    "children": [],
+    "born_at": "2026-04-10T20:45:00.000Z",
+    "status": "fertile",
+    "score": 6.4,
+    "scores": {
+      "novelty": 6,
+      "surprise": 5,
+      "aesthetics": 8,
+      "craft": 7
+    },
+    "niches": [
+      "canvas-2d",
+      "css"
+    ],
+    "review": "A faithful generative Mondrian with recursive subdivision, strict primary palette (red, blue, yellow, cream, black), thick grid lines, and animated transitions between compositions every 5 seconds. The screenshot is gorgeous -- a convincing De Stijl painting with asymmetric proportions and restrained color placement. Mouse position subtly influences split ratios and a seeded PRNG ensures reproducibility. But generative Mondrian is a well-known exercise, and the result, while beautifully executed, does not surprise. The compositions cycle predictably and the visual language, by design, never escapes its historical source.",
+    "techniques": [
+      "canvas-2d",
+      "recursive-subdivision",
+      "mondrian-composition",
+      "de-stijl",
+      "primary-colors",
+      "geometric-abstraction",
+      "asymmetric-grid",
+      "animated-transitions",
+      "mouse-interaction",
+      "light-background",
+      "click-interaction",
+      "seeded-prng"
+    ],
+    "reaped_at": null
+  },
+  {
+    "id": "exp-027",
+    "title": "Infinite Corridor",
+    "hypothesis": "What if the viewer could drift through an impossible labyrinth of interconnected corridors that violate spatial logic — non-Euclidean portals teleporting between distant rooms, checkerboard floors stretching into purple and teal infinity, floating geometric glyphs hovering in the void — proving the colony can build environments, not just organisms?",
+    "parents": [],
+    "generation": 3,
+    "children": [],
+    "born_at": "2026-04-10T18:30:00.000Z",
+    "status": "fertile",
+    "score": 6.9,
+    "scores": {
+      "novelty": 7,
+      "surprise": 7,
+      "aesthetics": 7,
+      "craft": 7
+    },
+    "niches": [
+      "3d",
+      "canvas-2d"
+    ],
+    "review": "A canvas-2D raycaster with DDA algorithm, portal teleportation, procedural labyrinth generation, checkerboard floors, colored lighting, and floating geometric sprites. The viewer auto-navigates through corridors that loop impossibly via portal cells. The screenshot shows a convincing 3D corridor with teal walls and floating glyphs. The non-Euclidean portal mechanic is genuinely surprising when you realize you have teleported. More atmospheric and explorable than exp-015's static 3D garden, though the visual fidelity is limited by the canvas-2D raycasting approach.",
+    "techniques": [
+      "canvas-2d",
+      "raycasting",
+      "dda-algorithm",
+      "non-euclidean-geometry",
+      "portal-teleportation",
+      "procedural-labyrinth",
+      "checkerboard-floor",
+      "colored-lighting",
+      "floating-sprites",
+      "auto-navigation",
+      "mouse-interaction",
+      "fog-of-war",
+      "impossible-architecture"
+    ],
+    "reaped_at": null
+  },
+  {
+    "id": "exp-025",
+    "title": "Ulam Spiral",
+    "hypothesis": "What if we visualize the Ulam spiral with glowing diagonal density to reveal the mysterious alignment of primes?",
+    "parents": [],
+    "generation": 1,
+    "children": [],
+    "born_at": "2026-04-10T02:23:00Z",
+    "status": "alive",
+    "score": 6.7,
+    "scores": {
+      "novelty": 7,
+      "surprise": 6,
+      "aesthetics": 7,
+      "craft": 7
+    },
+    "niches": [
+      "canvas-2d",
+      "generative-math"
+    ],
+    "review": "Solid Ulam spiral with diagonal-density coloring that makes prime clusters glow amber against cool blue. Competent but the subject matter is well-trodden territory.",
+    "techniques": [
+      "canvas-2d",
+      "number-theory",
+      "sieve-algorithm",
+      "pixel-manipulation"
+    ],
+    "reaped_at": null
+  },
+  {
+    "id": "exp-036",
+    "title": "Nave",
+    "hypothesis": "What if we build a gothic cathedral nave using only CSS 3D transforms, perspective, and subtle light animations?",
+    "parents": [],
+    "generation": 1,
+    "children": [],
+    "born_at": "2026-04-10T02:43:10Z",
+    "status": "alive",
+    "score": 7.1,
+    "scores": {
+      "novelty": 8,
+      "surprise": 7,
+      "aesthetics": 6,
+      "craft": 7
+    },
+    "niches": [
+      "css",
+      "3d",
+      "dom"
+    ],
+    "review": "A cathedral rendered entirely in CSS transforms — architecturally ambitious and atmospheric, though the darkness swallows much of the careful detail work.",
+    "techniques": [
+      "css-3d",
+      "perspective",
+      "css-animation",
+      "parallax"
+    ],
+    "reaped_at": null
+  },
+  {
+    "id": "exp-037",
+    "title": "Erosion",
+    "hypothesis": "What if we simulate hydraulic erosion on procedural terrain with interactive rain sources?",
+    "parents": [],
+    "generation": 1,
+    "children": [],
+    "born_at": "2026-04-10T02:43:07Z",
+    "status": "alive",
+    "score": 5.8,
+    "scores": {
+      "novelty": 6,
+      "surprise": 5,
+      "aesthetics": 6,
+      "craft": 7
+    },
+    "niches": [
+      "canvas-2d",
+      "physics"
+    ],
+    "review": "Standard hydraulic erosion on a procedural island — well-implemented with bilinear droplet physics but doesn't transcend the genre.",
+    "techniques": [
+      "canvas-2d",
+      "hydraulic-erosion",
+      "heightmap",
+      "noise"
+    ],
+    "reaped_at": null
+  },
+  {
+    "id": "exp-038",
+    "title": "Resonant Nave",
+    "hypothesis": "What if sound waves in a cathedral space generated visible gothic architecture through SVG interference patterns?",
+    "parents": [],
+    "generation": 1,
+    "children": [
+      "exp-046"
+    ],
+    "born_at": "2026-04-10T02:43:52Z",
+    "status": "fertile",
+    "score": 6.8,
+    "scores": {
+      "novelty": 8,
+      "surprise": 7,
+      "aesthetics": 5,
+      "craft": 6
+    },
+    "niches": [
+      "svg",
+      "audio"
+    ],
+    "review": "Ingenious concept — sound sources manifest as pillars and their interference patterns become gothic arches. The idea outshines the execution, which reads very dark and thin.",
+    "techniques": [
+      "svg",
+      "web-audio",
+      "interference",
+      "generative-architecture"
+    ],
+    "reaped_at": null
+  },
+  {
+    "id": "exp-039",
+    "title": "Tidal Memory",
+    "hypothesis": "What if tidal erosion shaped an archipelago in real time, with mouse-driven storm surges affecting the coastline?",
+    "parents": [],
+    "generation": 1,
+    "children": [],
+    "born_at": "2026-04-10T02:43:57Z",
+    "status": "alive",
+    "score": 6.2,
+    "scores": {
+      "novelty": 6,
+      "surprise": 6,
+      "aesthetics": 7,
+      "craft": 6
+    },
+    "niches": [
+      "canvas-2d",
+      "physics"
+    ],
+    "review": "Attractive archipelago with mouse-controlled tides — the color palette is the strongest element, though the low-resolution grid and simplistic noise limit geological believability.",
+    "techniques": [
+      "canvas-2d",
+      "tidal-simulation",
+      "erosion",
+      "biome-coloring"
+    ],
+    "reaped_at": null
+  },
+  {
+    "id": "exp-040",
+    "title": "Erosion",
+    "hypothesis": "What if we rendered hydraulic erosion on a slowly rotating 3D terrain with warm geological coloring?",
+    "parents": [],
+    "generation": 1,
+    "children": [],
+    "born_at": "2026-04-10T02:44:00Z",
+    "status": "alive",
+    "score": 4.6,
+    "scores": {
+      "novelty": 5,
+      "surprise": 4,
+      "aesthetics": 4,
+      "craft": 6
+    },
+    "niches": [
+      "canvas-2d",
+      "3d",
+      "physics"
+    ],
+    "review": "Low-resolution oblique terrain lost in a sea of black — the erosion model works but the 80x80 grid and poor framing produce an underwhelming result in a gallery saturated with erosion experiments.",
+    "techniques": [
+      "canvas-2d",
+      "3d-projection",
+      "hydraulic-erosion",
+      "painters-algorithm"
+    ],
+    "reaped_at": null
+  },
+  {
+    "id": "exp-041",
+    "title": "Stratigraphy",
+    "hypothesis": "What if geological strata accumulated, folded, faulted, and eroded in real time with embedded fossils?",
+    "parents": [],
+    "generation": 1,
+    "children": [],
+    "born_at": "2026-04-10T02:43:20Z",
+    "status": "alive",
+    "score": 6.1,
+    "scores": {
+      "novelty": 7,
+      "surprise": 6,
+      "aesthetics": 5,
+      "craft": 6
+    },
+    "niches": [
+      "canvas-2d",
+      "physics",
+      "generative-math"
+    ],
+    "review": "Models deep geological time with deposition, folding, faulting, and embedded fossils — conceptually the richest of the erosion cluster, but the flat rendering undersells the complexity underneath.",
+    "techniques": [
+      "canvas-2d",
+      "geology-simulation",
+      "tectonic-folding",
+      "fossil-rendering"
+    ],
+    "reaped_at": null
+  },
+  {
+    "id": "exp-042",
+    "title": "Sediment",
+    "hypothesis": "What if geological text strata eroded under rain, releasing typographic debris from each layer?",
+    "parents": [],
+    "generation": 1,
+    "children": [
+      "exp-045"
+    ],
+    "born_at": "2026-04-10T02:43:11Z",
+    "status": "alive",
+    "score": 7.2,
+    "scores": {
+      "novelty": 8,
+      "surprise": 7,
+      "aesthetics": 7,
+      "craft": 6
+    },
+    "niches": [
+      "canvas-2d",
+      "typography",
+      "physics"
+    ],
+    "review": "Geological strata made of their own vocabulary — GRANITE, TRILOBITE, BASALT become both label and material, with eroded text fragments tumbling downhill. The typography-as-geology concept gives this the identity the other erosion pieces lack.",
+    "techniques": [
+      "canvas-2d",
+      "typography",
+      "erosion",
+      "particle-system"
+    ],
+    "reaped_at": null
+  },
+  {
+    "id": "exp-043",
+    "title": "Tideline",
+    "hypothesis": "What if a full coastal scene with tides, foam, and weather responded to mouse-driven time-of-day via a WebGL shader?",
+    "parents": [],
+    "generation": 1,
+    "children": [],
+    "born_at": "2026-04-10T02:43:22Z",
+    "status": "alive",
+    "score": 7.0,
+    "scores": {
+      "novelty": 7,
+      "surprise": 6,
+      "aesthetics": 8,
+      "craft": 8
+    },
+    "niches": [
+      "shader"
+    ],
+    "review": "A complete coastal world in a single shader — sunset to starlight via mouse control, with foam, tidal pools, seabirds, and rain. The most visually polished piece in this batch.",
+    "techniques": [
+      "webgl2",
+      "fragment-shader",
+      "fbm",
+      "atmospheric-rendering",
+      "water-simulation"
+    ],
+    "reaped_at": null
+  },
+  {
+    "id": "exp-044",
+    "title": "Strata",
+    "hypothesis": "What if we raymarched a tectonically evolving landscape with sedimentary color strata and a day-night cycle?",
+    "parents": [],
+    "generation": 1,
+    "children": [
+      "exp-045"
+    ],
+    "born_at": "2026-04-10T02:43:01Z",
+    "status": "fertile",
+    "score": 7.2,
+    "scores": {
+      "novelty": 7,
+      "surprise": 6,
+      "aesthetics": 9,
+      "craft": 8
+    },
+    "niches": [
+      "shader",
+      "3d"
+    ],
+    "review": "Raymarched geological terrain with tectonic drift and sedimentary strata banding — stunningly rendered with domain-warped ridges, carved rivers, and golden-hour lighting that evokes landscape painting.",
+    "techniques": [
+      "webgl",
+      "raymarching",
+      "3d-simplex-noise",
+      "domain-warping",
+      "atmospheric-scattering"
+    ],
+    "reaped_at": null
+  },
+  {
+    "id": "exp-045",
+    "title": "Lithotext",
+    "hypothesis": "What if geological vocabulary became literal terrain -- typographic strata of GRANITE, TRILOBITE, FERN embedded as texture inside a raymarched landscape, so that moving through 3D space is also reading the Earth's autobiography, and exposed cliff faces reveal the words that name them?",
+    "parents": [
+      "exp-042",
+      "exp-044"
+    ],
+    "generation": 2,
+    "children": [],
+    "born_at": "2026-04-10T23:00:00.000Z",
+    "status": "fertile",
+    "score": 7.1,
+    "scores": {
+      "novelty": 8,
+      "surprise": 6,
+      "aesthetics": 7,
+      "craft": 8
+    },
+    "niches": [
+      "shader",
+      "3d",
+      "typography",
+      "generative-math"
+    ],
+    "review": "A raymarched terrain built from fractal noise with text-as-geological-strata is a genuinely novel cross-domain concept. The screenshot shows moody crags with subtle green stratigraphy -- atmospheric but the text layer is barely legible. Solid shader craft with proper normals, shadows, fog, and water. The text-in-terrain idea deserves more visual payoff than it currently delivers.",
+    "techniques": [
+      "webgl",
+      "fragment-shader",
+      "raymarching",
+      "simplex-noise",
+      "fbm",
+      "text-texture",
+      "terrain-generation",
+      "lighting"
+    ],
+    "reaped_at": null
+  },
+  {
+    "id": "exp-046",
+    "title": "Resonant Decay",
+    "hypothesis": "What if 576 HTML form elements could be arranged in a cathedral nave, their color, size, and position driven by acoustic wave interference from harmonic sound sources -- so that clicking creates a pillar of sound, pairs of pillars spawn gothic arches overhead in SVG, and the browser's own UI vocabulary resonates like stained glass vibrating in a pipe organ's drone?",
+    "parents": [
+      "exp-020",
+      "exp-038"
+    ],
+    "generation": 4,
+    "children": [],
+    "born_at": "2026-04-10T23:00:00.000Z",
+    "status": "fertile",
+    "score": 6.9,
+    "scores": {
+      "novelty": 7,
+      "surprise": 7,
+      "aesthetics": 7,
+      "craft": 6
+    },
+    "niches": [
+      "dom",
+      "svg",
+      "audio",
+      "css"
+    ],
+    "review": "A grid of native DOM elements (buttons, inputs, selects) animated by audio-driven wave interference into a cathedral metaphor with SVG arches and a rose window. The screenshot is a vivid neon mosaic. Concept is ambitious -- but the 576 DOM elements with per-frame style writes is brute-force, and the cathedral structure is more suggested than realized in the static image.",
+    "techniques": [
+      "dom-elements",
+      "svg-arches",
+      "webaudio",
+      "wave-interference",
+      "rose-window",
+      "cathedral-metaphor",
+      "grid-animation"
+    ],
+    "reaped_at": null
+  },
+  {
+    "id": "exp-047",
+    "title": "Abyssal Synesthesia",
+    "hypothesis": "What if a deep-sea bioluminescent organism grew new petals, tendrils, and spores in response to keyboard input -- each letter mapped to a unique hue, a pentatonic pitch with delay feedback, and a petal angle in a golden-ratio spiral -- so that typing becomes gardening in the abyss, and the SVG flower is a living record of every word you have given it?",
+    "parents": [
+      "exp-019",
+      "exp-033"
+    ],
+    "generation": 4,
+    "children": [],
+    "born_at": "2026-04-10T23:00:00.000Z",
+    "status": "alive",
+    "score": 5.9,
+    "scores": {
+      "novelty": 6,
+      "surprise": 5,
+      "aesthetics": 7,
+      "craft": 6
+    },
+    "niches": [
+      "svg",
+      "audio",
+      "typography",
+      "input"
+    ],
+    "review": "A flower that grows petals from typed letters, each mapped to a note. The nebula backdrop and SVG filter warping produce a lush deep-space bloom. But the concept of type-to-grow-visual is well-trodden in generative art, and the auto-typed seed text produces a small, under-developed flower in the screenshot. The audio-delay feedback is a nice touch.",
+    "techniques": [
+      "svg-petals",
+      "svg-filters",
+      "webaudio",
+      "pentatonic-scale",
+      "golden-angle-spiral",
+      "keyboard-input",
+      "radial-gradient"
+    ],
+    "reaped_at": null
+  },
+  {
+    "id": "exp-048",
+    "title": "Stigmata",
+    "hypothesis": "What if a stained-glass window healed itself when left alone but fractured under touch -- and remembered every wound across sessions, accumulating permanent scars that darken its light?",
+    "parents": [],
+    "generation": 1,
+    "children": [],
+    "born_at": "2026-04-10T18:39:40.000Z",
+    "status": "dead",
+    "score": 1.0,
+    "scores": {
+      "novelty": 1,
+      "surprise": 1,
+      "aesthetics": 1,
+      "craft": 1
+    },
+    "niches": [
+      "canvas-2d",
+      "input"
+    ],
+    "review": "No HTML file or screenshot exists. The experiment was never built. A hypothesis without an artifact is worth nothing.",
+    "techniques": [
+      "voronoi",
+      "stained-glass",
+      "fracture-propagation",
+      "localStorage-memory",
+      "pixel-manipulation",
+      "paradoxical-constraint",
+      "wound-heal-cycle",
+      "persistent-state",
+      "vignette"
+    ],
+    "reaped_at": "2026-04-10T23:59:00.000Z"
+  },
+  {
+    "id": "exp-049",
+    "title": "The Observer Dissolves the Observed",
+    "hypothesis": "What if reading is an act of destruction — where your gaze dissolves the very text it touches, characters tremble and crumble into ash under attention, and only the words you ignore survive?",
+    "parents": [],
+    "generation": 1,
+    "children": [],
+    "born_at": "2026-04-10T18:41:30.925315+00:00",
+    "status": "alive",
+    "score": 7.0,
+    "scores": {
+      "novelty": 7,
+      "surprise": 7,
+      "aesthetics": 7,
+      "craft": 7
+    },
+    "niches": [
+      "canvas-2d",
+      "typography",
+      "input"
+    ],
+    "review": "Text that dissolves under the cursor's gaze and regenerates when left alone. The metaphor (observation as destruction) is philosophically rich and the execution delivers -- characters tremble, shift hue toward red, scatter as ash, then slowly reassemble. The auto-sweep produces a visually compelling screenshot with partial dissolution. Not the first text-physics experiment here, but the thematic framing elevates it.",
+    "techniques": [
+      "canvas-2d",
+      "character-particles",
+      "mouse-proximity",
+      "dissolution",
+      "ash-particles",
+      "text-layout",
+      "regeneration-cycle"
+    ],
+    "reaped_at": null
+  },
+  {
+    "id": "exp-050",
+    "title": "Plague Symphony",
+    "hypothesis": "What if a contagion spread through a musical score, infecting notes that mutate in pitch and die — epidemiology meets orchestral notation, creating a composition you can watch sicken and die?",
+    "parents": [],
+    "generation": 1,
+    "children": ["exp-053"],
+    "born_at": "2026-04-10T22:30:00.000Z",
+    "status": "fertile",
+    "score": 7.7,
+    "scores": {
+      "novelty": 8,
+      "surprise": 8,
+      "aesthetics": 7,
+      "craft": 7
+    },
+    "niches": [
+      "canvas-2d",
+      "audio",
+      "generative-math"
+    ],
+    "review": "A plague spreading through a musical score is a brilliant cross-domain collision. Notes infect neighbors, mutate (gaining accidentals), and die while the staff lines warp. The epidemiological report overlay and the parchment aesthetic are well-realized. The screenshot catches early infection with mostly healthy notes -- the real drama unfolds over time as the symphony deteriorates. Genuinely surprising concept for this gallery.",
+    "techniques": [
+      "canvas-2d",
+      "musical-notation",
+      "contagion-simulation",
+      "epidemiological-model",
+      "webaudio",
+      "staff-rendering",
+      "mutation-system",
+      "particle-effects"
+    ],
+    "reaped_at": null
+  },
+  {
+    "id": "exp-051",
+    "title": "Palimpsest",
+    "hypothesis": "What if text remembered every touch as a wound -- words shatter where you click, and when you stop, fragments crawl back toward scar positions that drift with each wound, so the text is never the same twice and accumulates visible damage history?",
+    "parents": [],
+    "generation": 1,
+    "children": [],
+    "born_at": "2026-04-10T22:45:00.000Z",
+    "status": "alive",
+    "score": 5.7,
+    "scores": {
+      "novelty": 6,
+      "surprise": 5,
+      "aesthetics": 6,
+      "craft": 6
+    },
+    "niches": [
+      "canvas-2d",
+      "typography",
+      "input",
+      "physics"
+    ],
+    "review": "Text as a surface that remembers wounds -- characters are scattered by mouse drags and heal back imperfectly, accumulating scars over time. The concept overlaps heavily with exp-049 (observer dissolves), and the screenshot shows barely visible displacement on parchment. The wound-scar-heal cycle is a solid mechanic but the visual impact is underwhelming compared to its sibling.",
+    "techniques": [
+      "canvas-2d",
+      "character-particles",
+      "spring-physics",
+      "wound-memory",
+      "scar-tissue",
+      "mouse-drag",
+      "text-layout"
+    ],
+    "reaped_at": null
+  },
+  {
+    "id": "exp-052",
+    "title": "Tectonic Scripture",
+    "hypothesis": "What if text lived on invisible tectonic plates, so that reading became a seismological event -- fault lines crack through sentences, magma glows in the rifts between words, and each earthquake reveals older ghost-text rising from below?",
+    "parents": [],
+    "generation": 1,
+    "children": ["exp-054"],
+    "born_at": "2026-04-10T23:45:00.000Z",
+    "status": "fertile",
+    "score": 7.6,
+    "scores": {
+      "novelty": 8,
+      "surprise": 7,
+      "aesthetics": 8,
+      "craft": 7
+    },
+    "niches": [
+      "canvas-2d",
+      "typography",
+      "physics"
+    ],
+    "review": "Text lives on invisible tectonic plates that drift apart, with fault lines glowing as magma. Click to trigger earthquakes that shatter text along faults while older text rises from below in fiery red. The screenshot is striking -- cream text fragmenting against dark stone, fault lines incandescent, deep text emerging. A strong cross-domain fusion of geology and calligraphy that surpasses the other text-physics experiments.",
+    "techniques": [
+      "canvas-2d",
+      "voronoi-plates",
+      "tectonic-simulation",
+      "fault-lines",
+      "earthquake-mechanic",
+      "palimpsest",
+      "magma-glow",
+      "deep-text-reveal"
+    ],
+    "reaped_at": null
+  },
+  {
+    "id": "exp-053",
+    "title": "Pandemic Cascade",
+    "hypothesis": "What if a plague could spread through a hexagonal musical score via chain-reaction mechanics -- each infected note building toward critical mass, then exploding to infect all neighbors in a domino cascade, so that the strategy of chain reactions from a board game becomes the epidemiology of a dying symphony?",
+    "parents": ["exp-030", "exp-050"],
+    "generation": 4,
+    "children": [],
+    "born_at": "2026-04-10T23:30:00.000Z",
+    "status": "alive",
+    "score": null,
+    "scores": {"novelty": null, "surprise": null, "aesthetics": null, "craft": null},
+    "niches": ["canvas-2d", "audio", "input"],
+    "review": null,
+    "techniques": [
+      "canvas-2d",
+      "hex-grid",
+      "chain-reaction",
+      "contagion-simulation",
+      "musical-notation",
+      "webaudio",
+      "mutation-system",
+      "particle-effects",
+      "epidemiological-model",
+      "click-interaction"
+    ],
+    "reaped_at": null
+  },
+  {
+    "id": "exp-054",
+    "title": "Tectonic Stained Glass",
+    "hypothesis": "What if reaction-diffusion Turing patterns were rendered as luminous stained glass living on drifting tectonic plates -- fault lines glowing with magma where plates meet, and earthquakes shattering the tessellation along plate boundaries to reveal deep fire beneath, so that the beauty of morphogenesis meets the violence of geology?",
+    "parents": ["exp-052", "exp-024"],
+    "generation": 5,
+    "children": [],
+    "born_at": "2026-04-10T23:30:00.000Z",
+    "status": "alive",
+    "score": null,
+    "scores": {"novelty": null, "surprise": null, "aesthetics": null, "craft": null},
+    "niches": ["shader", "generative-math", "physics"],
+    "review": null,
+    "techniques": [
+      "webgl",
+      "fragment-shader",
+      "reaction-diffusion",
+      "gray-scott-model",
+      "stained-glass",
+      "voronoi-plates",
+      "tectonic-simulation",
+      "fault-lines",
+      "earthquake-mechanic",
+      "magma-glow",
+      "ping-pong-fbo",
+      "mouse-interaction"
+    ],
+    "reaped_at": null
+  }
+]

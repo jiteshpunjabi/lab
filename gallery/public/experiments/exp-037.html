@@ -1,0 +1,389 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>exp-037 — Erosion</title>
+<style>
+  * { margin: 0; padding: 0; }
+  body { overflow: hidden; background: #050510; }
+  canvas { display: block; position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; }
+  #info {
+    position: fixed; bottom: 12px; left: 12px;
+    color: rgba(255,255,255,0.25); font: 11px/1.4 monospace;
+    pointer-events: none; z-index: 10;
+  }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="info">click to rain · scroll to tilt</div>
+<script>
+(() => {
+  const canvas = document.getElementById('c');
+  const ctx = canvas.getContext('2d');
+
+  const S = 400; // heightmap resolution
+  const CW = 1280, CH = 720;
+  canvas.width = CW;
+  canvas.height = CH;
+
+  let terrain = new Float32Array(S * S);
+  let waterMap = new Float32Array(S * S);
+
+  let tilt = 0.55;
+  let mouseDown = false;
+  let rainSources = [];
+  let totalDrops = 0;
+
+  // Permutation table for noise
+  const P = new Uint8Array(512);
+  for (let i = 0; i < 256; i++) P[i] = i;
+  for (let i = 255; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [P[i], P[j]] = [P[j], P[i]];
+  }
+  for (let i = 0; i < 256; i++) P[i + 256] = P[i];
+
+  const GRAD = [[1,1],[-1,1],[1,-1],[-1,-1],[1,0],[-1,0],[0,1],[0,-1]];
+
+  function simplex(xin, yin) {
+    const F2 = 0.5 * (Math.sqrt(3) - 1);
+    const G2 = (3 - Math.sqrt(3)) / 6;
+    const s = (xin + yin) * F2;
+    const i = Math.floor(xin + s), j = Math.floor(yin + s);
+    const t = (i + j) * G2;
+    const x0 = xin - (i - t), y0 = yin - (j - t);
+    const i1 = x0 > y0 ? 1 : 0, j1 = x0 > y0 ? 0 : 1;
+    const x1 = x0 - i1 + G2, y1 = y0 - j1 + G2;
+    const x2 = x0 - 1 + 2 * G2, y2 = y0 - 1 + 2 * G2;
+    const ii = i & 255, jj = j & 255;
+    const g0 = GRAD[P[ii + P[jj]] % 8];
+    const g1 = GRAD[P[ii + i1 + P[jj + j1]] % 8];
+    const g2 = GRAD[P[ii + 1 + P[jj + 1]] % 8];
+    let n0 = 0, n1 = 0, n2 = 0;
+    let t0 = 0.5 - x0 * x0 - y0 * y0;
+    if (t0 > 0) { t0 *= t0; n0 = t0 * t0 * (g0[0] * x0 + g0[1] * y0); }
+    let t1 = 0.5 - x1 * x1 - y1 * y1;
+    if (t1 > 0) { t1 *= t1; n1 = t1 * t1 * (g1[0] * x1 + g1[1] * y1); }
+    let t2 = 0.5 - x2 * x2 - y2 * y2;
+    if (t2 > 0) { t2 *= t2; n2 = t2 * t2 * (g2[0] * x2 + g2[1] * y2); }
+    return 70 * (n0 + n1 + n2);
+  }
+
+  function fbm(x, y, oct) {
+    let v = 0, a = 1, f = 1, m = 0;
+    for (let i = 0; i < oct; i++) {
+      v += a * simplex(x * f, y * f);
+      m += a; a *= 0.5; f *= 2.1;
+    }
+    return v / m;
+  }
+
+  function ridgedNoise(x, y, oct) {
+    let v = 0, a = 1, f = 1, m = 0;
+    for (let i = 0; i < oct; i++) {
+      const n = 1 - Math.abs(simplex(x * f, y * f));
+      v += a * n * n;
+      m += a; a *= 0.45; f *= 2.2;
+    }
+    return v / m;
+  }
+
+  function generateTerrain() {
+    waterMap.fill(0);
+    for (let y = 0; y < S; y++) {
+      for (let x = 0; x < S; x++) {
+        const nx = x / S - 0.5, ny = y / S - 0.5;
+        let h = fbm(nx * 3.5, ny * 3.5, 6) * 0.5 + 0.5;
+        const ridge = ridgedNoise(nx * 2.5 + 10, ny * 2.5 + 7, 5);
+        h = h * 0.45 + ridge * 0.55;
+        // Circular island mask
+        const dx = nx * 2, dy = ny * 2;
+        const dist = Math.sqrt(dx * dx + dy * dy);
+        const mask = smoothstep(1.1, 0.3, dist);
+        h *= mask;
+        // Add some plateaus
+        h = h * 0.8 + Math.pow(h, 0.5) * 0.2;
+        terrain[y * S + x] = h;
+      }
+    }
+    totalDrops = 0;
+  }
+
+  function smoothstep(edge0, edge1, x) {
+    const t = Math.max(0, Math.min(1, (x - edge0) / (edge1 - edge0)));
+    return t * t * (3 - 2 * t);
+  }
+
+  // Droplet-based hydraulic erosion
+  function erode(iterations) {
+    for (let iter = 0; iter < iterations; iter++) {
+      let px, py;
+      if (rainSources.length > 0 && Math.random() < 0.6) {
+        const src = rainSources[Math.floor(Math.random() * rainSources.length)];
+        px = src.x + (Math.random() - 0.5) * 20;
+        py = src.y + (Math.random() - 0.5) * 20;
+      } else {
+        px = Math.random() * (S - 4) + 2;
+        py = Math.random() * (S - 4) + 2;
+      }
+
+      let sediment = 0, speed = 1, water = 1;
+      let dirX = 0, dirY = 0;
+      const inertia = 0.1, capacityK = 6, depositionR = 0.2;
+      const erosionR = 0.35, evapR = 0.015, gravity = 5;
+
+      for (let step = 0; step < 90; step++) {
+        const xi = Math.floor(px), yi = Math.floor(py);
+        if (xi < 2 || xi >= S - 2 || yi < 2 || yi >= S - 2) break;
+        const idx = yi * S + xi;
+
+        // Track water flow for visualization
+        waterMap[idx] += water * 0.05;
+
+        // Gradient using bilinear interpolation
+        const fx = px - xi, fy = py - yi;
+        const h00 = terrain[idx], h10 = terrain[idx + 1];
+        const h01 = terrain[idx + S], h11 = terrain[idx + S + 1];
+        const gx = (h10 - h00) * (1 - fy) + (h11 - h01) * fy;
+        const gy = (h01 - h00) * (1 - fx) + (h11 - h10) * fx;
+
+        dirX = dirX * inertia - gx * (1 - inertia);
+        dirY = dirY * inertia - gy * (1 - inertia);
+
+        let len = Math.sqrt(dirX * dirX + dirY * dirY);
+        if (len < 1e-5) {
+          const a = Math.random() * Math.PI * 2;
+          dirX = Math.cos(a); dirY = Math.sin(a);
+          len = 1;
+        } else {
+          dirX /= len; dirY /= len;
+        }
+
+        const npx = px + dirX, npy = py + dirY;
+        const nxi = Math.floor(npx), nyi = Math.floor(npy);
+        if (nxi < 1 || nxi >= S - 1 || nyi < 1 || nyi >= S - 1) break;
+
+        const hOld = h00 * (1-fx) * (1-fy) + h10 * fx * (1-fy) + h01 * (1-fx) * fy + h11 * fx * fy;
+        const nfx = npx - nxi, nfy = npy - nyi;
+        const nidx = nyi * S + nxi;
+        const hNew = terrain[nidx] * (1-nfx)*(1-nfy) + terrain[nidx+1] * nfx*(1-nfy) +
+                     terrain[nidx+S] * (1-nfx)*nfy + terrain[nidx+S+1] * nfx*nfy;
+        const dh = hNew - hOld;
+
+        const cap = Math.max(-dh * speed * water * capacityK, 0.01);
+
+        if (sediment > cap || dh > 0) {
+          const dep = dh > 0 ? Math.min(dh, sediment) : (sediment - cap) * depositionR;
+          sediment -= dep;
+          // Deposit bilinearly
+          terrain[idx] += dep * (1-fx)*(1-fy);
+          terrain[idx+1] += dep * fx*(1-fy);
+          terrain[idx+S] += dep * (1-fx)*fy;
+          terrain[idx+S+1] += dep * fx*fy;
+        } else {
+          const er = Math.min((cap - sediment) * erosionR, -dh * 0.5);
+          sediment += er;
+          // Erode bilinearly
+          terrain[idx] -= er * (1-fx)*(1-fy);
+          terrain[idx+1] -= er * fx*(1-fy);
+          terrain[idx+S] -= er * (1-fx)*fy;
+          terrain[idx+S+1] -= er * fx*fy;
+          // Clamp
+          terrain[idx] = Math.max(0, terrain[idx]);
+          terrain[idx+1] = Math.max(0, terrain[idx+1]);
+          terrain[idx+S] = Math.max(0, terrain[idx+S]);
+          terrain[idx+S+1] = Math.max(0, terrain[idx+S+1]);
+        }
+
+        speed = Math.sqrt(Math.max(0.01, speed * speed - dh * gravity));
+        water *= (1 - evapR);
+        px = npx; py = npy;
+        if (water < 0.005) break;
+      }
+      totalDrops++;
+    }
+
+    // Decay water map slowly
+    for (let i = 0; i < S * S; i++) waterMap[i] *= 0.995;
+
+    // Decay rain sources
+    for (let i = rainSources.length - 1; i >= 0; i--) {
+      rainSources[i].life--;
+      if (rainSources[i].life <= 0) rainSources.splice(i, 1);
+    }
+  }
+
+  // Render as oblique relief map
+  function render() {
+    ctx.fillStyle = '#050510';
+    ctx.fillRect(0, 0, CW, CH);
+
+    const img = ctx.createImageData(CW, CH);
+    const d = img.data;
+
+    // Scale and offset to center
+    const scale = Math.min(CW, CH) / S * 1.1;
+    const offsetX = (CW - S * scale) / 2;
+    const offsetY = CH * 0.15;
+    const heightScale = S * tilt * 0.4;
+
+    // Render back-to-front (top rows first = further away)
+    for (let ty = 0; ty < S; ty++) {
+      for (let tx = 0; tx < S; tx++) {
+        const idx = ty * S + tx;
+        const h = terrain[idx];
+        const w = waterMap[idx];
+
+        // Screen position
+        const sx = Math.floor(offsetX + tx * scale);
+        const sy = Math.floor(offsetY + ty * scale - h * heightScale);
+
+        if (sx < 0 || sx >= CW || sy < 0 || sy >= CH) continue;
+
+        // Normal/slope for lighting
+        const hL = tx > 0 ? terrain[idx - 1] : h;
+        const hR = tx < S - 1 ? terrain[idx + 1] : h;
+        const hU = ty > 0 ? terrain[idx - S] : h;
+        const hD = ty < S - 1 ? terrain[idx + S] : h;
+
+        const slopeX = (hR - hL) * 4;
+        const slopeY = (hD - hU) * 4;
+        const slope = Math.sqrt(slopeX * slopeX + slopeY * slopeY);
+
+        // Directional light from upper-left
+        const light = Math.max(0.35, Math.min(1.3, 0.75 + slopeX * 2.0 - slopeY * 0.8));
+        // Ambient occlusion approximation from curvature
+        const curv = (hL + hR + hU + hD) / 4 - h;
+        const ao = Math.max(0.65, Math.min(1.0, 1.0 + curv * 5));
+
+        // Hypsometric color
+        let r, g, b;
+        if (h < 0.02) {
+          // Deep water
+          r = 12; g = 25; b = 55;
+        } else if (h < 0.08) {
+          // Beach / coastal
+          const t = (h - 0.02) / 0.06;
+          r = 70 + t * 90; g = 75 + t * 70; b = 45 + t * 20;
+        } else if (h < 0.2) {
+          // Lowland forest
+          const t = (h - 0.08) / 0.12;
+          r = 45 + t * 15; g = 85 + t * 35; b = 30 + t * 10;
+        } else if (h < 0.4) {
+          // Mid forest
+          const t = (h - 0.2) / 0.2;
+          r = 60 + t * 30; g = 120 - t * 10; b = 40 + t * 10;
+        } else if (h < 0.55) {
+          // Highland
+          const t = (h - 0.4) / 0.15;
+          r = 110 + t * 60; g = 100 + t * 25; b = 60 + t * 30;
+        } else if (h < 0.7) {
+          // Rock
+          const t = (h - 0.55) / 0.15;
+          r = 170 + t * 30; g = 150 + t * 30; b = 125 + t * 35;
+        } else {
+          // Snow caps
+          const t = Math.min(1, (h - 0.7) / 0.2);
+          r = 200 + t * 50; g = 205 + t * 45; b = 220 + t * 30;
+        }
+
+        // Water channel tinting
+        if (w > 0.3 && h > 0.02) {
+          const wt = Math.min(1, w / 4);
+          r = Math.floor(r * (1 - wt * 0.7) + 20 * wt);
+          g = Math.floor(g * (1 - wt * 0.5) + 50 * wt);
+          b = Math.floor(b * (1 - wt * 0.3) + 90 * wt);
+        }
+
+        // Apply lighting
+        const l = light * ao;
+        r = Math.floor(Math.min(255, r * l));
+        g = Math.floor(Math.min(255, g * l));
+        b = Math.floor(Math.min(255, b * l));
+
+        // Draw vertical column (the "cliff face" below the surface point)
+        const baseY = Math.floor(offsetY + ty * scale);
+        const colHeight = baseY - sy;
+
+        // Surface pixel
+        const pi = (sy * CW + sx) * 4;
+        if (sy >= 0 && sy < CH && sx >= 0 && sx < CW) {
+          d[pi] = r; d[pi+1] = g; d[pi+2] = b; d[pi+3] = 255;
+        }
+
+        // Cliff face
+        if (colHeight > 0) {
+          for (let cy = 1; cy <= colHeight && sy + cy < CH; cy++) {
+            const ci = ((sy + cy) * CW + sx) * 4;
+            const shade = 0.2 + 0.15 * (cy / colHeight);
+            // Cliff color: darker, more brown
+            d[ci] = Math.floor(Math.min(r * shade, 80));
+            d[ci+1] = Math.floor(Math.min(g * shade, 60));
+            d[ci+2] = Math.floor(Math.min(b * shade, 50));
+            d[ci+3] = 255;
+          }
+        }
+      }
+    }
+
+    ctx.putImageData(img, 0, 0);
+
+    // Age indicator
+    ctx.fillStyle = 'rgba(255,255,255,0.15)';
+    ctx.font = '10px monospace';
+    ctx.fillText(`${(totalDrops/1000).toFixed(0)}k drops`, CW - 70, CH - 12);
+  }
+
+  // Init
+  generateTerrain();
+  erode(5000);
+
+  function loop() {
+    erode(80);
+    render();
+    requestAnimationFrame(loop);
+  }
+
+  // Mouse interaction - rain
+  canvas.addEventListener('mousedown', (e) => {
+    mouseDown = true;
+    addRainAt(e);
+  });
+  canvas.addEventListener('mousemove', (e) => {
+    if (mouseDown) addRainAt(e);
+  });
+  canvas.addEventListener('mouseup', () => { mouseDown = false; });
+
+  function addRainAt(e) {
+    const rect = canvas.getBoundingClientRect();
+    const scale2 = Math.min(CW, CH) / S * 1.1;
+    const ox = (CW - S * scale2) / 2;
+    const oy = CH * 0.15;
+    const tx = (e.clientX / rect.width * CW - ox) / scale2;
+    const ty = (e.clientY / rect.height * CH - oy) / scale2;
+    if (tx >= 0 && tx < S && ty >= 0 && ty < S) {
+      rainSources.push({ x: tx, y: ty, life: 200 });
+    }
+  }
+
+  canvas.addEventListener('wheel', (e) => {
+    e.preventDefault();
+    tilt = Math.max(0.1, Math.min(1.2, tilt + e.deltaY * 0.002));
+  }, { passive: false });
+
+  document.addEventListener('keydown', (e) => {
+    if (e.code === 'Space') {
+      e.preventDefault();
+      rainSources = [];
+      generateTerrain();
+      erode(5000);
+    }
+  });
+
+  loop();
+})();
+</script>
+</body>
+</html>

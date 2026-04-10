@@ -1,0 +1,416 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>exp-021 — Cellular Composition</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+  background: #0c0818;
+  overflow: hidden;
+  font-family: 'Courier New', monospace;
+}
+canvas { display: block; }
+#info {
+  position: fixed;
+  bottom: 14px;
+  left: 14px;
+  color: #4a3a6a;
+  font-size: 11px;
+  pointer-events: none;
+}
+#label {
+  position: fixed;
+  top: 20px;
+  left: 50%;
+  transform: translateX(-50%);
+  color: #7a5aaa;
+  font-size: 13px;
+  pointer-events: none;
+  text-align: center;
+  opacity: 0.7;
+  letter-spacing: 3px;
+}
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="label">CELLULAR COMPOSITION</div>
+<div id="info">exp-021 / rule 110 automaton &rarr; pentatonic melody + harmonic drones / webaudio</div>
+<script>
+(function() {
+  const canvas = document.getElementById('c');
+  const ctx = canvas.getContext('2d');
+  const W = canvas.width = 1280;
+  const H = canvas.height = 720;
+
+  // --- Cellular Automaton ---
+  const CELLS = 32;
+  const RULE = 110;
+  let cells = new Uint8Array(CELLS);
+  let history = [];
+  const MAX_ROWS = 48;
+
+  // Seed: single cell in center + a few random
+  cells[Math.floor(CELLS / 2)] = 1;
+  cells[5] = 1;
+  cells[CELLS - 4] = 1;
+
+  function ruleBit(l, c, r) {
+    const idx = (l << 2) | (c << 1) | r;
+    return (RULE >> idx) & 1;
+  }
+
+  function step() {
+    const next = new Uint8Array(CELLS);
+    for (let i = 0; i < CELLS; i++) {
+      const l = cells[(i - 1 + CELLS) % CELLS];
+      const c = cells[i];
+      const r = cells[(i + 1) % CELLS];
+      next[i] = ruleBit(l, c, r);
+    }
+    history.push(Array.from(cells));
+    if (history.length > MAX_ROWS) history.shift();
+    cells = next;
+    return history[history.length - 1];
+  }
+
+  // --- Audio Engine ---
+  let audioCtx = null;
+  let masterGain = null;
+  let reverbNode = null;
+  let droneMaster = null;
+  let droneOscs = [];
+  let droneGains = [];
+  let started = false;
+
+  // Pentatonic scale degrees mapped to MIDI notes across 3 octaves
+  const PENTATONIC = [
+    48, 50, 53, 55, 57,  // C3 pentatonic
+    60, 62, 65, 67, 69,  // C4
+    72, 74, 77, 79, 81,  // C5
+    84, 86, 89, 91, 93,  // C6
+  ];
+
+  // Chord progressions (root MIDI notes) — cycle through
+  const CHORDS = [
+    [48, 55, 60, 67],  // C  G  C  G
+    [53, 60, 65, 72],  // F  C  F  C
+    [45, 52, 57, 64],  // A  E  A  E
+    [50, 57, 62, 69],  // D  A  D  A
+  ];
+  let chordIdx = 0;
+  let beatCount = 0;
+
+  function midiToFreq(midi) {
+    return 440 * Math.pow(2, (midi - 69) / 12);
+  }
+
+  function createReverb() {
+    const convolver = audioCtx.createConvolver();
+    const rate = audioCtx.sampleRate;
+    const length = rate * 2.5;
+    const impulse = audioCtx.createBuffer(2, length, rate);
+    for (let ch = 0; ch < 2; ch++) {
+      const data = impulse.getChannelData(ch);
+      for (let i = 0; i < length; i++) {
+        data[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / length, 2.2);
+      }
+    }
+    convolver.buffer = impulse;
+    return convolver;
+  }
+
+  function initAudio() {
+    audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+
+    masterGain = audioCtx.createGain();
+    masterGain.gain.value = 0.35;
+
+    reverbNode = createReverb();
+    const reverbGain = audioCtx.createGain();
+    reverbGain.gain.value = 0.4;
+
+    const dryGain = audioCtx.createGain();
+    dryGain.gain.value = 0.7;
+
+    masterGain.connect(dryGain);
+    masterGain.connect(reverbNode);
+    reverbNode.connect(reverbGain);
+    dryGain.connect(audioCtx.destination);
+    reverbGain.connect(audioCtx.destination);
+
+    // Drone layer
+    droneMaster = audioCtx.createGain();
+    droneMaster.gain.value = 0.06;
+    droneMaster.connect(reverbNode);
+    const droneDry = audioCtx.createGain();
+    droneDry.gain.value = 0.04;
+    droneMaster.connect(droneDry);
+    droneDry.connect(audioCtx.destination);
+
+    updateDrones(CHORDS[0]);
+  }
+
+  function updateDrones(chord) {
+    const now = audioCtx.currentTime;
+    // Fade out old drones
+    for (let i = 0; i < droneOscs.length; i++) {
+      droneGains[i].gain.setTargetAtTime(0, now, 0.8);
+      droneOscs[i].stop(now + 4);
+    }
+    droneOscs = [];
+    droneGains = [];
+
+    // Create new drones
+    for (let i = 0; i < chord.length; i++) {
+      const osc = audioCtx.createOscillator();
+      const g = audioCtx.createGain();
+      osc.type = 'sine';
+      osc.frequency.value = midiToFreq(chord[i]);
+      // Slight detune for warmth
+      osc.detune.value = (Math.random() - 0.5) * 8;
+      g.gain.value = 0;
+      g.gain.setTargetAtTime(1, now, 1.2);
+      osc.connect(g);
+      g.connect(droneMaster);
+      osc.start(now);
+      droneOscs.push(osc);
+      droneGains.push(g);
+
+      // Add a second osc for richer sound
+      const osc2 = audioCtx.createOscillator();
+      const g2 = audioCtx.createGain();
+      osc2.type = 'triangle';
+      osc2.frequency.value = midiToFreq(chord[i]) * 2.002;
+      g2.gain.value = 0;
+      g2.gain.setTargetAtTime(0.3, now, 1.5);
+      osc2.connect(g2);
+      g2.connect(droneMaster);
+      osc2.start(now);
+      droneOscs.push(osc2);
+      droneGains.push(g2);
+    }
+  }
+
+  function playNote(cellIndex, velocity) {
+    if (!audioCtx) return;
+    // Map cell index to pentatonic note
+    const noteIdx = Math.floor((cellIndex / CELLS) * PENTATONIC.length);
+    const midi = PENTATONIC[Math.min(noteIdx, PENTATONIC.length - 1)];
+    const freq = midiToFreq(midi);
+
+    const now = audioCtx.currentTime;
+    const osc = audioCtx.createOscillator();
+    const g = audioCtx.createGain();
+    const filter = audioCtx.createBiquadFilter();
+
+    // Vary timbre based on position
+    const timbreChoice = cellIndex % 4;
+    osc.type = ['sine', 'triangle', 'sine', 'triangle'][timbreChoice];
+    osc.frequency.value = freq;
+
+    filter.type = 'lowpass';
+    filter.frequency.value = 1200 + velocity * 2000;
+    filter.Q.value = 1.5;
+
+    const vol = 0.08 + velocity * 0.12;
+    const attack = 0.01;
+    const decay = 0.15;
+    const sustain = vol * 0.3;
+    const release = 0.4 + Math.random() * 0.3;
+
+    g.gain.value = 0;
+    g.gain.setTargetAtTime(vol, now, attack);
+    g.gain.setTargetAtTime(sustain, now + decay, 0.1);
+    g.gain.setTargetAtTime(0, now + decay + 0.2, release);
+
+    osc.connect(filter);
+    filter.connect(g);
+    g.connect(masterGain);
+    osc.start(now);
+    osc.stop(now + decay + 0.2 + release * 4);
+  }
+
+  // Active note glow tracking
+  let activeGlows = [];
+
+  function triggerGeneration() {
+    const row = step();
+    beatCount++;
+
+    // Change chord every 16 beats
+    if (beatCount % 16 === 0) {
+      chordIdx = (chordIdx + 1) % CHORDS.length;
+      if (started) updateDrones(CHORDS[chordIdx]);
+    }
+
+    // Play notes for living cells
+    const aliveIndices = [];
+    for (let i = 0; i < CELLS; i++) {
+      if (row[i] === 1) {
+        aliveIndices.push(i);
+      }
+    }
+
+    // Don't play every cell — select a subset for musicality
+    const maxNotes = 6;
+    const playable = aliveIndices.length <= maxNotes
+      ? aliveIndices
+      : aliveIndices.filter((_, idx) => idx % Math.ceil(aliveIndices.length / maxNotes) === 0);
+
+    for (const i of playable) {
+      const velocity = 0.4 + Math.random() * 0.6;
+      if (started) playNote(i, velocity);
+      activeGlows.push({ x: i, age: 0, vel: velocity });
+    }
+  }
+
+  // --- Visual Rendering ---
+  let time = 0;
+  const CELL_W = W / CELLS;
+  const ROW_H = H / MAX_ROWS;
+
+  // Color palette — deep purples and teals
+  function cellColor(alive, age, glow) {
+    if (!alive && glow <= 0) return null;
+    const hue = 260 + age * 3; // purple shifting to blue
+    const sat = 70 + glow * 30;
+    const light = alive ? (20 + glow * 50) : (glow * 30);
+    const alpha = alive ? (0.6 + glow * 0.4) : (glow * 0.5);
+    return `hsla(${hue % 360}, ${sat}%, ${light}%, ${alpha})`;
+  }
+
+  function draw() {
+    // Dark fade
+    ctx.fillStyle = 'rgba(12, 8, 24, 0.12)';
+    ctx.fillRect(0, 0, W, H);
+
+    time += 0.016;
+
+    // Draw automaton history as a scrolling grid
+    for (let row = 0; row < history.length; row++) {
+      const y = H - (history.length - row) * ROW_H;
+      const rowAge = history.length - row;
+      const rowAlpha = Math.max(0.05, 1 - rowAge / MAX_ROWS);
+
+      for (let col = 0; col < CELLS; col++) {
+        if (history[row][col] === 1) {
+          const x = col * CELL_W;
+
+          // Check for active glow on this cell in current row
+          let glowAmt = 0;
+          if (row === history.length - 1) {
+            for (const g of activeGlows) {
+              if (g.x === col && g.age < 1) {
+                glowAmt = (1 - g.age) * g.vel;
+              }
+            }
+          }
+
+          const hue = 260 + rowAge * 2 + col * 3;
+          const sat = 60 + glowAmt * 40;
+          const lightness = 15 + rowAlpha * 20 + glowAmt * 40;
+          const alpha = rowAlpha * 0.7 + glowAmt * 0.3;
+
+          // Cell body
+          ctx.fillStyle = `hsla(${hue % 360}, ${sat}%, ${lightness}%, ${alpha})`;
+          ctx.fillRect(x + 1, y + 1, CELL_W - 2, ROW_H - 2);
+
+          // Glow effect for recently triggered notes
+          if (glowAmt > 0.1) {
+            const grd = ctx.createRadialGradient(
+              x + CELL_W / 2, y + ROW_H / 2, 0,
+              x + CELL_W / 2, y + ROW_H / 2, CELL_W * 1.5
+            );
+            grd.addColorStop(0, `hsla(${(hue + 40) % 360}, 90%, 70%, ${glowAmt * 0.5})`);
+            grd.addColorStop(1, 'transparent');
+            ctx.fillStyle = grd;
+            ctx.fillRect(x - CELL_W, y - ROW_H, CELL_W * 3, ROW_H * 3);
+          }
+        }
+      }
+
+      // Faint grid line
+      ctx.strokeStyle = `rgba(80, 50, 120, ${rowAlpha * 0.08})`;
+      ctx.beginPath();
+      ctx.moveTo(0, y);
+      ctx.lineTo(W, y);
+      ctx.stroke();
+    }
+
+    // Draw current generation highlight at bottom
+    if (history.length > 0) {
+      const currentRow = history[history.length - 1];
+      const y = H - ROW_H;
+      ctx.fillStyle = 'rgba(120, 80, 200, 0.03)';
+      ctx.fillRect(0, y, W, ROW_H);
+    }
+
+    // Vertical grid lines (faint)
+    for (let i = 0; i <= CELLS; i++) {
+      ctx.strokeStyle = 'rgba(80, 50, 120, 0.06)';
+      ctx.beginPath();
+      ctx.moveTo(i * CELL_W, 0);
+      ctx.lineTo(i * CELL_W, H);
+      ctx.stroke();
+    }
+
+    // Chord indicator - bottom right
+    if (started) {
+      const chord = CHORDS[chordIdx];
+      const noteNames = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
+      const chordName = chord.map(m => noteNames[m % 12]).join(' ');
+      ctx.fillStyle = `hsla(280, 50%, 50%, ${0.3 + 0.1 * Math.sin(time * 2)})`;
+      ctx.font = '12px Courier New';
+      ctx.textAlign = 'right';
+      ctx.fillText('drone: ' + chordName, W - 20, H - 10);
+
+      // Beat indicator
+      const beatInChord = beatCount % 16;
+      for (let i = 0; i < 16; i++) {
+        ctx.fillStyle = i < beatInChord
+          ? `hsla(270, 60%, 50%, 0.5)`
+          : `hsla(270, 30%, 20%, 0.3)`;
+        ctx.fillRect(W - 200 + i * 11, H - 30, 8, 4);
+      }
+    }
+
+    // Update glow ages
+    activeGlows = activeGlows.filter(g => {
+      g.age += 0.03;
+      return g.age < 1;
+    });
+
+    requestAnimationFrame(draw);
+  }
+
+  // --- Timing ---
+  const BPM = 140;
+  const BEAT_MS = (60 / BPM) * 1000;
+
+  // Auto-start audio on first user gesture
+  function startAudio() {
+    if (started) return;
+    started = true;
+    initAudio();
+    document.removeEventListener('click', startAudio);
+    document.removeEventListener('keydown', startAudio);
+  }
+  document.addEventListener('click', startAudio);
+  document.addEventListener('keydown', startAudio);
+
+  // Start the automaton immediately (visual even without audio)
+  // Seed plenty of initial history so the grid looks full
+  for (let i = 0; i < MAX_ROWS; i++) step();
+
+  setInterval(triggerGeneration, BEAT_MS);
+
+  ctx.fillStyle = '#0c0818';
+  ctx.fillRect(0, 0, W, H);
+  draw();
+})();
+</script>
+</body>
+</html>

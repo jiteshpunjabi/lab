@@ -1,0 +1,483 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>exp-047 — Abyssal Synesthesia</title>
+<style>
+  *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    width: 100vw; height: 100vh; overflow: hidden;
+    background: #020010;
+    display: flex; align-items: center; justify-content: center;
+  }
+  svg { width: 100vw; height: 100vh; }
+  #prompt {
+    position: absolute; bottom: 30px; left: 50%;
+    transform: translateX(-50%);
+    color: rgba(255,255,255,0.3);
+    font-size: 13px; font-family: monospace;
+    letter-spacing: 2px; pointer-events: none;
+    transition: opacity 2s;
+  }
+  #typed {
+    position: absolute; top: 16px; left: 24px; right: 24px;
+    color: rgba(255,255,255,0.08);
+    font-size: 10px; font-family: monospace;
+    letter-spacing: 3px; word-break: break-all;
+    line-height: 1.8; pointer-events: none;
+  }
+</style>
+</head>
+<body>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 720" id="stage">
+  <defs>
+    <filter id="warp" x="-50%" y="-50%" width="200%" height="200%">
+      <feTurbulence id="turb" type="fractalNoise" baseFrequency="0.012 0.018" numOctaves="4" seed="7" result="noise"/>
+      <feDisplacementMap in="SourceGraphic" in2="noise" scale="30" xChannelSelector="R" yChannelSelector="G"/>
+    </filter>
+    <filter id="glow" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur stdDeviation="6" result="blur"/>
+      <feComposite in="SourceGraphic" in2="blur" operator="over"/>
+    </filter>
+    <filter id="deepglow" x="-100%" y="-100%" width="300%" height="300%">
+      <feGaussianBlur stdDeviation="18" result="blur"/>
+      <feColorMatrix type="saturate" values="2.5" in="blur" result="sat"/>
+      <feComposite in="SourceGraphic" in2="sat" operator="over"/>
+    </filter>
+    <filter id="morph" x="-50%" y="-50%" width="200%" height="200%">
+      <feTurbulence id="morphTurb" type="turbulence" baseFrequency="0.02 0.025" numOctaves="3" seed="42" result="mnoise"/>
+      <feDisplacementMap in="SourceGraphic" in2="mnoise" scale="18" xChannelSelector="R" yChannelSelector="B"/>
+      <feGaussianBlur stdDeviation="1"/>
+    </filter>
+    <radialGradient id="coreGrad" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#ffffff" stop-opacity="1"/>
+      <stop offset="15%" stop-color="#ffccee" stop-opacity="1"/>
+      <stop offset="35%" stop-color="#ff44aa" stop-opacity="0.9"/>
+      <stop offset="60%" stop-color="#cc00ff" stop-opacity="0.6"/>
+      <stop offset="100%" stop-color="#220044" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="sporeGrad" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#ccffff" stop-opacity="1"/>
+      <stop offset="50%" stop-color="#44ddff" stop-opacity="0.7"/>
+      <stop offset="100%" stop-color="#0044ff" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+
+  <g id="nebula" filter="url(#deepglow)" opacity="0.5"></g>
+  <g id="bloom" transform="translate(640, 360)" filter="url(#warp)">
+    <g id="outerPetals" opacity="0.65"></g>
+    <g id="innerPetals" opacity="0.8"></g>
+    <circle cx="0" cy="0" r="40" fill="url(#coreGrad)" filter="url(#glow)"/>
+  </g>
+  <g id="spores"></g>
+  <g id="tendrils" filter="url(#morph)" opacity="0.75"></g>
+  <g id="letters"></g>
+</svg>
+<div id="prompt">press any key -- each letter grows a petal and sings</div>
+<div id="typed"></div>
+
+<script>
+const SVG_NS = "http://www.w3.org/2000/svg";
+const stage = document.getElementById("stage");
+const nebulaG = document.getElementById("nebula");
+const outerPetalsG = document.getElementById("outerPetals");
+const innerPetalsG = document.getElementById("innerPetals");
+const sporesG = document.getElementById("spores");
+const tendrilsG = document.getElementById("tendrils");
+const lettersG = document.getElementById("letters");
+const turb = document.getElementById("turb");
+const morphTurb = document.getElementById("morphTurb");
+
+let mouseX = 640, mouseY = 360;
+let time = 0;
+let totalTyped = '';
+
+// Audio
+let audioCtx = null;
+let masterGain = null;
+let delayNode = null;
+
+function initAudio() {
+  if (audioCtx) return;
+  audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  masterGain = audioCtx.createGain();
+  masterGain.gain.value = 0.2;
+  delayNode = audioCtx.createDelay(1.0);
+  delayNode.delayTime.value = 0.4;
+  const feedback = audioCtx.createGain();
+  feedback.gain.value = 0.35;
+  const lpf = audioCtx.createBiquadFilter();
+  lpf.type = 'lowpass';
+  lpf.frequency.value = 1600;
+  masterGain.connect(audioCtx.destination);
+  masterGain.connect(delayNode);
+  delayNode.connect(lpf);
+  lpf.connect(feedback);
+  feedback.connect(delayNode);
+  delayNode.connect(audioCtx.destination);
+}
+
+// Pentatonic scale
+const scale = [
+  220.00, 246.94, 277.18, 329.63, 369.99,
+  440.00, 493.88, 554.37, 659.25, 739.99,
+  880.00, 987.77, 1108.73, 1318.51, 1479.98,
+  1760.00, 1975.53, 2217.46, 2637.02, 2959.96,
+  261.63, 293.66, 311.13, 349.23, 392.00, 523.25
+];
+
+function charIndex(ch) {
+  const i = ch.toLowerCase().charCodeAt(0) - 97;
+  return (i >= 0 && i <= 25) ? i : -1;
+}
+
+function charToHue(ch) {
+  const i = charIndex(ch);
+  return i < 0 ? 260 : (i * 360 / 26 + 10) % 360;
+}
+
+function charToFreq(ch) {
+  const i = charIndex(ch);
+  return i < 0 ? 440 : scale[i];
+}
+
+function playNote(ch) {
+  initAudio();
+  const freq = charToFreq(ch);
+  const now = audioCtx.currentTime;
+  const osc = audioCtx.createOscillator();
+  const gain = audioCtx.createGain();
+  const filter = audioCtx.createBiquadFilter();
+
+  const vowels = 'aeiou';
+  osc.type = vowels.includes(ch.toLowerCase()) ? 'sine' : 'triangle';
+  osc.frequency.setValueAtTime(freq, now);
+  osc.detune.setValueAtTime((Math.random() - 0.5) * 10, now);
+  filter.type = 'lowpass';
+  filter.frequency.setValueAtTime(Math.min(freq * 4, 6000), now);
+  filter.Q.value = 2;
+  gain.gain.setValueAtTime(0, now);
+  gain.gain.linearRampToValueAtTime(0.18, now + 0.02);
+  gain.gain.exponentialRampToValueAtTime(0.001, now + 1.8);
+  osc.connect(filter);
+  filter.connect(gain);
+  gain.connect(masterGain);
+  osc.start(now);
+  osc.stop(now + 2);
+}
+
+// Nebula background
+const nebulaColors = ["#ff006650", "#6600ff45", "#00ffaa35", "#ff440045", "#0066ff40"];
+for (let i = 0; i < 6; i++) {
+  const blob = document.createElementNS(SVG_NS, "ellipse");
+  const angle = (i / 6) * Math.PI * 2;
+  blob.setAttribute("cx", 640 + Math.cos(angle) * 260);
+  blob.setAttribute("cy", 360 + Math.sin(angle) * 160);
+  blob.setAttribute("rx", 100 + Math.random() * 70);
+  blob.setAttribute("ry", 70 + Math.random() * 50);
+  blob.setAttribute("fill", nebulaColors[i % nebulaColors.length]);
+  nebulaG.appendChild(blob);
+}
+
+// Initial base petals (small, waiting for input)
+const OUTER_COUNT = 8;
+const outerPetals = [];
+for (let i = 0; i < OUTER_COUNT; i++) {
+  const petal = document.createElementNS(SVG_NS, "ellipse");
+  petal.setAttribute("fill", `hsla(${(i / OUTER_COUNT) * 360}, 80%, 45%, 0.6)`);
+  outerPetalsG.appendChild(petal);
+  outerPetals.push({ el: petal, baseAngle: (i / OUTER_COUNT) * Math.PI * 2, dist: 70, rx: 60, ry: 16, hue: (i / OUTER_COUNT) * 360 });
+}
+
+const INNER_COUNT = 5;
+const innerPetals = [];
+for (let i = 0; i < INNER_COUNT; i++) {
+  const petal = document.createElementNS(SVG_NS, "ellipse");
+  petal.setAttribute("fill", `hsla(${((i + 2) / INNER_COUNT) * 360}, 85%, 50%, 0.7)`);
+  innerPetalsG.appendChild(petal);
+  innerPetals.push({ el: petal, baseAngle: (i / INNER_COUNT) * Math.PI * 2 + 0.4, dist: 35, rx: 40, ry: 10, hue: ((i + 2) / INNER_COUNT) * 360 });
+}
+
+// Spores
+const SPORE_COUNT = 40;
+const spores = [];
+for (let i = 0; i < SPORE_COUNT; i++) {
+  const spore = document.createElementNS(SVG_NS, "circle");
+  const r = 1.5 + Math.random() * 3;
+  spore.setAttribute("r", r);
+  spore.setAttribute("fill", `url(#sporeGrad)`);
+  spore.setAttribute("filter", "url(#glow)");
+  sporesG.appendChild(spore);
+  spores.push({
+    el: spore,
+    angle: Math.random() * Math.PI * 2,
+    radius: 130 + Math.random() * 300,
+    speed: 0.002 + Math.random() * 0.005,
+    drift: Math.random() * 0.5,
+    phase: Math.random() * Math.PI * 2,
+    size: r
+  });
+}
+
+// Tendrils
+const TENDRIL_COUNT = 4;
+const tendrils = [];
+for (let i = 0; i < TENDRIL_COUNT; i++) {
+  const path = document.createElementNS(SVG_NS, "path");
+  path.setAttribute("fill", "none");
+  path.setAttribute("stroke-width", "2.5");
+  path.setAttribute("stroke-linecap", "round");
+  path.setAttribute("stroke", `hsla(${(i / TENDRIL_COUNT) * 360}, 100%, 65%, 0.5)`);
+  tendrilsG.appendChild(path);
+  tendrils.push({ el: path, baseAngle: (i / TENDRIL_COUNT) * Math.PI * 2, segments: 6 });
+}
+
+// Typed-letter petals (grow with each keypress)
+const typedPetals = [];
+const typedLetterEls = [];
+
+function addLetterPetal(ch) {
+  const hue = charToHue(ch);
+  const freq = charToFreq(ch);
+  const idx = typedPetals.length;
+  const angle = idx * 2.399 + Math.PI * 0.5; // golden angle spiral
+
+  // New outer petal — grows from center
+  const petal = document.createElementNS(SVG_NS, "ellipse");
+  const gradId = `lpGrad${idx}`;
+
+  // Create unique gradient for this petal
+  const grad = document.createElementNS(SVG_NS, "radialGradient");
+  grad.id = gradId;
+  grad.setAttribute("cx", "50%"); grad.setAttribute("cy", "50%"); grad.setAttribute("r", "50%");
+  const s1 = document.createElementNS(SVG_NS, "stop");
+  s1.setAttribute("offset", "0%"); s1.setAttribute("stop-color", `hsl(${hue}, 90%, 70%)`);
+  const s2 = document.createElementNS(SVG_NS, "stop");
+  s2.setAttribute("offset", "50%"); s2.setAttribute("stop-color", `hsla(${hue}, 80%, 45%, 0.7)`);
+  const s3 = document.createElementNS(SVG_NS, "stop");
+  s3.setAttribute("offset", "100%"); s3.setAttribute("stop-color", `hsla(${hue}, 60%, 20%, 0)`);
+  grad.appendChild(s1); grad.appendChild(s2); grad.appendChild(s3);
+  stage.querySelector('defs').appendChild(grad);
+
+  petal.setAttribute("fill", `url(#${gradId})`);
+  outerPetalsG.appendChild(petal);
+
+  typedPetals.push({
+    el: petal, angle, hue, freq,
+    dist: 80 + idx * 3.5,
+    rx: 50 + (freq / 3000) * 60,
+    ry: 12 + (freq / 3000) * 10,
+    birth: time, char: ch
+  });
+
+  // Floating letter near petal
+  const text = document.createElementNS(SVG_NS, "text");
+  text.textContent = ch.toUpperCase();
+  text.setAttribute("font-family", "monospace");
+  text.setAttribute("font-size", "14");
+  text.setAttribute("font-weight", "bold");
+  text.setAttribute("text-anchor", "middle");
+  text.setAttribute("fill", `hsla(${hue}, 80%, 75%, 0.6)`);
+  text.setAttribute("filter", "url(#glow)");
+  lettersG.appendChild(text);
+  typedLetterEls.push({ el: text, angle, dist: 80 + idx * 3.5, hue, birth: time });
+
+  // Add tendril for every 4th letter
+  if (idx % 4 === 0 && tendrils.length < 12) {
+    const path = document.createElementNS(SVG_NS, "path");
+    path.setAttribute("fill", "none");
+    path.setAttribute("stroke-width", "2");
+    path.setAttribute("stroke-linecap", "round");
+    path.setAttribute("stroke", `hsla(${hue}, 100%, 60%, 0.45)`);
+    tendrilsG.appendChild(path);
+    tendrils.push({ el: path, baseAngle: angle, segments: 5 + Math.floor(Math.random() * 3) });
+  }
+
+  // Add spore burst
+  for (let i = 0; i < 4; i++) {
+    const spore = document.createElementNS(SVG_NS, "circle");
+    const r = 1 + Math.random() * 2.5;
+    spore.setAttribute("r", r);
+    spore.setAttribute("fill", `hsla(${hue}, 80%, 70%, 0.6)`);
+    spore.setAttribute("filter", "url(#glow)");
+    sporesG.appendChild(spore);
+    spores.push({
+      el: spore,
+      angle: angle + (Math.random() - 0.5) * 1.2,
+      radius: 80 + idx * 3 + Math.random() * 80,
+      speed: 0.003 + Math.random() * 0.006,
+      drift: 0.3 + Math.random() * 0.7,
+      phase: Math.random() * Math.PI * 2,
+      size: r
+    });
+  }
+}
+
+// Mouse
+document.addEventListener("mousemove", (e) => {
+  const rect = stage.getBoundingClientRect();
+  mouseX = ((e.clientX - rect.left) / rect.width) * 1280;
+  mouseY = ((e.clientY - rect.top) / rect.height) * 720;
+});
+
+// Keyboard
+document.addEventListener('keydown', (e) => {
+  if (e.ctrlKey || e.metaKey || e.altKey) return;
+  if (e.key === 'Backspace' || e.key.length !== 1) return;
+  e.preventDefault();
+
+  addLetterPetal(e.key);
+  if (e.key !== ' ') playNote(e.key);
+  totalTyped += e.key;
+  document.getElementById('typed').textContent = totalTyped;
+  document.getElementById('prompt').style.opacity = '0';
+});
+
+// Auto-type seed for screenshot
+const seed = 'deep bloom sings';
+let si = 0;
+function autoType() {
+  if (si < seed.length) {
+    const ch = seed[si];
+    addLetterPetal(ch);
+    if (ch !== ' ') playNote(ch);
+    totalTyped += ch;
+    document.getElementById('typed').textContent = totalTyped;
+    si++;
+    setTimeout(autoType, 120 + Math.random() * 100);
+  }
+}
+setTimeout(autoType, 500);
+
+// Animation
+function animate() {
+  time += 0.016;
+
+  // Animate turbulence
+  const bfX = 0.012 + Math.sin(time * 0.25) * 0.004;
+  const bfY = 0.018 + Math.cos(time * 0.2) * 0.005;
+  turb.setAttribute("baseFrequency", `${bfX} ${bfY}`);
+  const mbfX = 0.02 + Math.sin(time * 0.4) * 0.006;
+  const mbfY = 0.025 + Math.cos(time * 0.35) * 0.005;
+  morphTurb.setAttribute("baseFrequency", `${mbfX} ${mbfY}`);
+
+  const mx = (mouseX - 640) / 640;
+  const my = (mouseY - 360) / 360;
+  const breathe = 1 + Math.sin(time * 0.7) * 0.12;
+
+  // Base outer petals
+  outerPetals.forEach((p, i) => {
+    const angle = p.baseAngle + time * 0.12 + Math.sin(time * 0.25 + i) * 0.15;
+    const dist = p.dist * breathe + mx * 10;
+    const cx = Math.cos(angle) * dist;
+    const cy = Math.sin(angle) * dist;
+    const rx = (p.rx + Math.sin(time * 0.4 + i * 0.7) * 15) * breathe;
+    const ry = p.ry + Math.sin(time * 0.6 + i) * 4;
+    const rot = (angle * 180 / Math.PI) + 90;
+    p.el.setAttribute("cx", cx);
+    p.el.setAttribute("cy", cy);
+    p.el.setAttribute("rx", rx);
+    p.el.setAttribute("ry", ry);
+    p.el.setAttribute("transform", `rotate(${rot} ${cx} ${cy})`);
+  });
+
+  // Inner petals
+  innerPetals.forEach((p, i) => {
+    const angle = p.baseAngle - time * 0.2 + Math.cos(time * 0.35 + i * 1.1) * 0.25;
+    const dist = p.dist * breathe + my * 8;
+    const cx = Math.cos(angle) * dist;
+    const cy = Math.sin(angle) * dist;
+    const rx = (p.rx + Math.sin(time * 0.5 + i * 0.8) * 10) * breathe;
+    const ry = p.ry + Math.cos(time * 0.7 + i) * 3;
+    const rot = (angle * 180 / Math.PI) + 90;
+    p.el.setAttribute("cx", cx);
+    p.el.setAttribute("cy", cy);
+    p.el.setAttribute("rx", rx);
+    p.el.setAttribute("ry", ry);
+    p.el.setAttribute("transform", `rotate(${rot} ${cx} ${cy})`);
+  });
+
+  // Typed-letter petals
+  typedPetals.forEach((p, i) => {
+    const age = time - p.birth;
+    const growIn = Math.min(1, age * 2);
+    const angle = p.angle + time * 0.08 + Math.sin(time * 0.3 + i * 0.5) * 0.1;
+    const dist = p.dist * breathe * growIn;
+    const cx = Math.cos(angle) * dist;
+    const cy = Math.sin(angle) * dist;
+    const rx = p.rx * breathe * growIn;
+    const ry = p.ry * growIn;
+    const rot = (angle * 180 / Math.PI) + 90;
+    p.el.setAttribute("cx", cx);
+    p.el.setAttribute("cy", cy);
+    p.el.setAttribute("rx", rx);
+    p.el.setAttribute("ry", ry);
+    p.el.setAttribute("transform", `rotate(${rot} ${cx} ${cy})`);
+    p.el.setAttribute("opacity", Math.min(0.7, growIn));
+  });
+
+  // Floating letters orbit near their petals
+  typedLetterEls.forEach((l, i) => {
+    const age = time - l.birth;
+    const growIn = Math.min(1, age * 1.5);
+    const angle = l.angle + time * 0.06 + Math.sin(time * 0.2 + i) * 0.08;
+    const dist = (l.dist + 20) * breathe * growIn;
+    const x = 640 + Math.cos(angle) * dist;
+    const y = 360 + Math.sin(angle) * dist;
+    l.el.setAttribute("x", x);
+    l.el.setAttribute("y", y);
+    l.el.setAttribute("opacity", Math.min(0.5, growIn * 0.5));
+  });
+
+  // Spores
+  spores.forEach((s) => {
+    s.angle += s.speed;
+    const wobble = Math.sin(time * 1.2 + s.phase) * s.drift * 25;
+    const r = s.radius + wobble + Math.sin(time * 0.25) * 15;
+    const x = 640 + Math.cos(s.angle) * r + mx * 25;
+    const y = 360 + Math.sin(s.angle) * r * 0.6 + my * 15;
+    const pulse = s.size * (1 + Math.sin(time * 1.8 + s.phase) * 0.35);
+    s.el.setAttribute("cx", x);
+    s.el.setAttribute("cy", y);
+    s.el.setAttribute("r", pulse);
+    s.el.setAttribute("opacity", 0.3 + Math.sin(time + s.phase) * 0.2);
+  });
+
+  // Tendrils
+  tendrils.forEach((t, i) => {
+    const baseA = t.baseAngle + time * 0.08;
+    let d = `M 640 360`;
+    let curX = 640, curY = 360;
+    for (let s = 1; s <= t.segments; s++) {
+      const segLen = 35 + s * 10;
+      const angle = baseA + Math.sin(time * 0.35 + s * 0.7 + i) * 0.45 + s * 0.12;
+      const cpAngle = angle + Math.cos(time * 0.5 + s) * 0.6;
+      const cpx = curX + Math.cos(cpAngle) * segLen * 0.6;
+      const cpy = curY + Math.sin(cpAngle) * segLen * 0.6;
+      curX = curX + Math.cos(angle) * segLen;
+      curY = curY + Math.sin(angle) * segLen;
+      d += ` Q ${cpx} ${cpy} ${curX} ${curY}`;
+    }
+    t.el.setAttribute("d", d);
+    const hue = ((i / tendrils.length) * 360 + time * 15) % 360;
+    t.el.setAttribute("stroke", `hsla(${hue}, 100%, 60%, 0.4)`);
+  });
+
+  // Nebula pulse
+  const nebulaEls = nebulaG.children;
+  for (let i = 0; i < nebulaEls.length; i++) {
+    const el = nebulaEls[i];
+    const baseRx = 100 + (i % 3) * 25;
+    const baseRy = 70 + (i % 4) * 15;
+    el.setAttribute("rx", baseRx + Math.sin(time * 0.18 + i) * 25);
+    el.setAttribute("ry", baseRy + Math.cos(time * 0.13 + i * 0.7) * 18);
+  }
+
+  requestAnimationFrame(animate);
+}
+
+animate();
+</script>
+</body>
+</html>

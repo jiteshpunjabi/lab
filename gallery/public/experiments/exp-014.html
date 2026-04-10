@@ -1,0 +1,223 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>exp-014 — Fractal Abyss</title>
+<style>
+  * { margin: 0; padding: 0; }
+  body { overflow: hidden; background: #000; }
+  canvas { display: block; width: 100vw; height: 100vh; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<script>
+const canvas = document.getElementById('c');
+const gl = canvas.getContext('webgl');
+
+function resize() {
+  canvas.width = window.innerWidth;
+  canvas.height = window.innerHeight;
+  gl.viewport(0, 0, canvas.width, canvas.height);
+}
+window.addEventListener('resize', resize);
+resize();
+
+const vsSource = `
+attribute vec2 a_position;
+void main() {
+  gl_Position = vec4(a_position, 0.0, 1.0);
+}`;
+
+const fsSource = `
+precision highp float;
+uniform vec2 u_resolution;
+uniform float u_time;
+uniform vec2 u_mouse;
+uniform float u_mode; // 0 = Mandelbrot, 1 = Julia
+uniform vec2 u_center;
+uniform float u_zoom;
+
+// Attempt smooth coloring with the escape-time algorithm
+vec3 hsv2rgb(vec3 c) {
+  vec3 p = abs(fract(c.xxx + vec3(1.0, 2.0/3.0, 1.0/3.0)) * 6.0 - 3.0);
+  return c.z * mix(vec3(1.0), clamp(p - 1.0, 0.0, 1.0), c.y);
+}
+
+vec3 palette(float t) {
+  // Vivid neon palette: deep blue -> electric magenta -> hot orange -> acid green -> cyan
+  float phase = t * 0.08 + u_time * 0.02;
+  vec3 col;
+  col.r = 0.5 + 0.5 * sin(phase * 3.0 + 0.0);
+  col.g = 0.5 + 0.5 * sin(phase * 3.0 + 2.1);
+  col.b = 0.5 + 0.5 * sin(phase * 3.0 + 4.2);
+  // Boost saturation by pushing away from gray
+  vec3 gray = vec3(dot(col, vec3(0.299, 0.587, 0.114)));
+  col = mix(gray, col, 1.8);
+  // Darken to prevent blowout, keep it rich
+  col *= 0.85;
+  return clamp(col, 0.0, 1.0);
+}
+
+void main() {
+  vec2 uv = (gl_FragCoord.xy - u_resolution * 0.5) / min(u_resolution.x, u_resolution.y);
+
+  // Apply zoom and pan
+  vec2 c_pos = uv / u_zoom + u_center;
+
+  float max_iter = 256.0;
+  vec2 z, c;
+
+  if (u_mode < 0.5) {
+    // Mandelbrot: z starts at 0, c = pixel position
+    z = vec2(0.0);
+    c = c_pos;
+  } else {
+    // Julia: z = pixel position, c = mouse-controlled constant
+    z = c_pos;
+    c = u_mouse;
+  }
+
+  float iter = 0.0;
+  float escape = 256.0; // large escape radius for smooth coloring
+
+  for (float i = 0.0; i < 256.0; i++) {
+    if (dot(z, z) > escape) break;
+    // z = z^2 + c
+    z = vec2(z.x * z.x - z.y * z.y, 2.0 * z.x * z.y) + c;
+    iter = i;
+  }
+
+  if (dot(z, z) <= escape) {
+    // Inside the set — deep pulsing void
+    float pulse = 0.02 + 0.015 * sin(u_time * 0.8);
+    gl_FragColor = vec4(pulse * 0.3, pulse * 0.05, pulse * 0.5, 1.0);
+  } else {
+    // Smooth iteration count (normalized)
+    float log_zn = log(dot(z, z)) * 0.5;
+    float nu = log(log_zn / log(2.0)) / log(2.0);
+    float smooth_iter = iter + 1.0 - nu;
+
+    // Multi-layered coloring
+    vec3 col = palette(smooth_iter);
+
+    // Add distance-based glow near the boundary
+    float edge_proximity = smooth_iter / max_iter;
+    float glow = exp(-edge_proximity * 8.0);
+    col += vec3(0.4, 0.1, 0.6) * glow;
+
+    // Rim lighting effect using iteration bands
+    float band = sin(smooth_iter * 0.15) * 0.5 + 0.5;
+    col = mix(col, col * 1.3, band * 0.3);
+
+    gl_FragColor = vec4(col, 1.0);
+  }
+}`;
+
+function createShader(type, source) {
+  const s = gl.createShader(type);
+  gl.shaderSource(s, source);
+  gl.compileShader(s);
+  if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) {
+    console.error(gl.getShaderInfoLog(s));
+    return null;
+  }
+  return s;
+}
+
+const vs = createShader(gl.VERTEX_SHADER, vsSource);
+const fs = createShader(gl.FRAGMENT_SHADER, fsSource);
+const program = gl.createProgram();
+gl.attachShader(program, vs);
+gl.attachShader(program, fs);
+gl.linkProgram(program);
+gl.useProgram(program);
+
+// Fullscreen quad
+const buf = gl.createBuffer();
+gl.bindBuffer(gl.ARRAY_BUFFER, buf);
+gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1,-1, 1,-1, -1,1, 1,1]), gl.STATIC_DRAW);
+const aPos = gl.getAttribLocation(program, 'a_position');
+gl.enableVertexAttribArray(aPos);
+gl.vertexAttribPointer(aPos, 2, gl.FLOAT, false, 0, 0);
+
+const uRes = gl.getUniformLocation(program, 'u_resolution');
+const uTime = gl.getUniformLocation(program, 'u_time');
+const uMouse = gl.getUniformLocation(program, 'u_mouse');
+const uMode = gl.getUniformLocation(program, 'u_mode');
+const uCenter = gl.getUniformLocation(program, 'u_center');
+const uZoom = gl.getUniformLocation(program, 'u_zoom');
+
+let mouse = { x: -0.7, y: 0.27015 }; // classic Julia constant
+let mode = 0; // start Mandelbrot
+let center = { x: -0.5, y: 0.0 };
+let zoom = 0.4;
+let targetZoom = 0.4;
+let targetCenter = { x: -0.5, y: 0.0 };
+
+// Auto-zoom into an interesting region over time
+let autoZoom = true;
+let autoZoomTarget = { x: -0.7436438885706, y: 0.1318259043124 }; // Seahorse valley
+
+canvas.addEventListener('mousemove', (e) => {
+  const nx = (e.clientX / canvas.width) * 2.0 - 1.0;
+  const ny = (1.0 - e.clientY / canvas.height) * 2.0 - 1.0;
+  mouse.x = nx * 1.5;
+  mouse.y = ny * 1.5;
+  autoZoom = false;
+});
+
+canvas.addEventListener('click', () => {
+  mode = 1 - mode;
+  if (mode === 0) {
+    targetCenter = { x: -0.5, y: 0.0 };
+    targetZoom = 0.35;
+  } else {
+    targetCenter = { x: 0.0, y: 0.0 };
+    targetZoom = 0.4;
+  }
+});
+
+canvas.addEventListener('wheel', (e) => {
+  e.preventDefault();
+  autoZoom = false;
+  const factor = e.deltaY > 0 ? 0.9 : 1.1;
+  targetZoom *= factor;
+}, { passive: false });
+
+const start = performance.now();
+
+function render() {
+  const t = (performance.now() - start) * 0.001;
+
+  // Auto-zoom animation into seahorse valley
+  if (autoZoom && mode === 0) {
+    const zoomSpeed = 0.008;
+    targetZoom *= (1.0 + zoomSpeed);
+    targetCenter.x += (autoZoomTarget.x - targetCenter.x) * 0.005;
+    targetCenter.y += (autoZoomTarget.y - targetCenter.y) * 0.005;
+    // Slowly drift the Julia constant for visual interest
+    mouse.x = -0.7 + 0.15 * Math.sin(t * 0.3);
+    mouse.y = 0.27 + 0.1 * Math.cos(t * 0.2);
+  }
+
+  // Smooth transitions
+  zoom += (targetZoom - zoom) * 0.05;
+  center.x += (targetCenter.x - center.x) * 0.05;
+  center.y += (targetCenter.y - center.y) * 0.05;
+
+  gl.uniform2f(uRes, canvas.width, canvas.height);
+  gl.uniform1f(uTime, t);
+  gl.uniform2f(uMouse, mouse.x, mouse.y);
+  gl.uniform1f(uMode, mode);
+  gl.uniform2f(uCenter, center.x, center.y);
+  gl.uniform1f(uZoom, zoom);
+
+  gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+  requestAnimationFrame(render);
+}
+render();
+</script>
+</body>
+</html>

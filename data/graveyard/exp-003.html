@@ -1,0 +1,92 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Particle Field Reaction</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.9.0/p5.min.js"></script>
+    <style>
+        body {
+            margin: 0;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            background-color: #335d81; /* Slightly darker background for contrast */
+            overflow: hidden;
+        }
+    </style>
+</head>
+<body>
+    <script>
+        let particles = [];
+        const NUM_PARTICLES = 300;
+        const P_SIZE = 3;
+
+        class Particle {
+            constructor(x, y) {
+                this.pos = createVector(x, y);
+                this.vel = p5.Vector.random2D().mult(random(0.5, 1.5));
+                this.acc = createVector(0, 0);
+                this.baseColor = color(random(150, 255), random(150, 255), random(150, 255), random(100, 200));
+            }
+
+            applyForce(force) {
+                this.acc.add(force);
+            }
+
+            update() {
+                this.vel.add(this.acc);
+                this.vel.limit(4); // Limit speed
+                this.pos.add(this.vel);
+                this.acc.mult(0); // Reset acceleration
+            }
+
+            show(mouseX, mouseY) {
+                let attractionForce = p5.Vector.sub(this.pos, createVector(mouseX, mouseY)).normalize().div(dist(this.pos.x, this.pos.y, mouseX, mouseY) + 1);
+                
+                // Repulsion force from mouse
+                let force = p5.Vector.sub(this.pos, createVector(mouseX, mouseY));
+                let distance = dist(this.pos.x, this.pos.y, mouseX, mouseY);
+                
+                if (distance < 150) {
+                    let strength = 1 - (distance / 150); // Stronger repulsion when closer
+                    force.normalize();
+                    force.mult(strength * 0.5); // Keep repulsion gentle
+                    
+                    this.applyForce(force);
+                }
+
+                this.update();
+
+                let d = dist(this.pos.x, this.pos.y, mouseX, mouseY);
+                let opacity = map(d, 0, 300, 0.1, 1);
+                
+                stroke(this.baseColor.levels[0], this.baseColor.levels[1], this.baseColor.levels[2], opacity * 0.8);
+                strokeWeight(P_SIZE * opacity);
+                point(this.pos.x, this.pos.y);
+            }
+        }
+
+        function setup() {
+            createCanvas(1280, 720);
+            particles = [];
+            for (let i = 0; i < NUM_PARTICLES; i++) {
+                particles.push(new Particle(random(width), random(height)));
+            }
+        }
+
+        function draw() {
+            background(20, 40, 70, 50); // Semi-transparent background to create trails
+            
+            let mouseX = mouseX / width * 2 - 1;
+            let mouseY = mouseY / height * 2 - 1;
+            
+            for (let i = 0; i < particles.length; i++) {
+                particles[i].show(mouseX + width/2, mouseY + height/2);
+            }
+        }
+    </script>
+</body>
+</html>

@@ -1,0 +1,426 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>exp-009 — Liquid Typography</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { background: #0a0a0f; overflow: hidden; cursor: crosshair; }
+  canvas { display: block; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<script>
+(() => {
+  const canvas = document.getElementById('c');
+  const ctx = canvas.getContext('2d');
+  let W, H;
+
+  // Fluid grid
+  const GRID = 64;
+  let cols, rows;
+  let vx, vy, vx0, vy0, dens, dens0;
+
+  // Text particles
+  const glyphs = [];
+  const GLYPH_COUNT = 1800;
+  const ALPHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789@#$%&?!;:+=~<>{}[]|/\\^*()'.split('');
+  // Add some interesting Unicode
+  const UNICODE = '\u03B1\u03B2\u03B3\u03B4\u03B5\u03B6\u03B7\u03B8\u03B9\u03BA\u03BB\u03BC\u03BD\u03BE\u03BF\u03C0\u03C1\u03C3\u03C4\u03C5\u03C6\u03C7\u03C8\u03C9\u2200\u2202\u2203\u2205\u2207\u2208\u2209\u221A\u221E\u222B\u2248\u2260\u2264\u2265\u2234\u2235\u25A0\u25A1\u25B2\u25B3\u25CF\u25CB\u2605\u2606\u2660\u2663\u2665\u2666\u266A\u266B'.split('');
+  const ALL_GLYPHS = ALPHABET.concat(UNICODE);
+
+  // Phrase that dissolves and reforms
+  const PHRASE = 'EVERYTHING FLOWS';
+
+  let mouseX = -1, mouseY = -1;
+  let prevMouseX = -1, prevMouseY = -1;
+  let mouseDown = false;
+  let time = 0;
+
+  function resize() {
+    W = canvas.width = window.innerWidth;
+    H = canvas.height = window.innerHeight;
+    cols = GRID + 2;
+    rows = GRID + 2;
+    const size = cols * rows;
+    vx = new Float32Array(size);
+    vy = new Float32Array(size);
+    vx0 = new Float32Array(size);
+    vy0 = new Float32Array(size);
+    dens = new Float32Array(size);
+    dens0 = new Float32Array(size);
+    initGlyphs();
+  }
+
+  function initGlyphs() {
+    glyphs.length = 0;
+    for (let i = 0; i < GLYPH_COUNT; i++) {
+      glyphs.push({
+        x: Math.random() * W,
+        y: Math.random() * H,
+        char: ALL_GLYPHS[Math.floor(Math.random() * ALL_GLYPHS.length)],
+        size: 8 + Math.random() * 20,
+        hue: Math.random() * 360,
+        rotation: Math.random() * Math.PI * 2,
+        vx: 0,
+        vy: 0,
+        life: 0.3 + Math.random() * 0.7,
+        phase: Math.random() * Math.PI * 2,
+        targetX: -1,
+        targetY: -1,
+        forming: false
+      });
+    }
+  }
+
+  // --- Fluid solver (Jos Stam style, simplified) ---
+  function IX(i, j) { return i + j * cols; }
+
+  function setBnd(b, x) {
+    for (let i = 1; i <= GRID; i++) {
+      x[IX(0, i)]      = b === 1 ? -x[IX(1, i)] : x[IX(1, i)];
+      x[IX(GRID+1, i)] = b === 1 ? -x[IX(GRID, i)] : x[IX(GRID, i)];
+      x[IX(i, 0)]      = b === 2 ? -x[IX(i, 1)] : x[IX(i, 1)];
+      x[IX(i, GRID+1)] = b === 2 ? -x[IX(i, GRID)] : x[IX(i, GRID)];
+    }
+    x[IX(0, 0)]           = 0.5 * (x[IX(1, 0)] + x[IX(0, 1)]);
+    x[IX(0, GRID+1)]      = 0.5 * (x[IX(1, GRID+1)] + x[IX(0, GRID)]);
+    x[IX(GRID+1, 0)]      = 0.5 * (x[IX(GRID, 0)] + x[IX(GRID+1, 1)]);
+    x[IX(GRID+1, GRID+1)] = 0.5 * (x[IX(GRID, GRID+1)] + x[IX(GRID+1, GRID)]);
+  }
+
+  function diffuse(b, x, x0, diff, dt) {
+    const a = dt * diff * GRID * GRID;
+    for (let k = 0; k < 4; k++) {
+      for (let j = 1; j <= GRID; j++) {
+        for (let i = 1; i <= GRID; i++) {
+          x[IX(i,j)] = (x0[IX(i,j)] + a * (x[IX(i-1,j)] + x[IX(i+1,j)] + x[IX(i,j-1)] + x[IX(i,j+1)])) / (1 + 4*a);
+        }
+      }
+      setBnd(b, x);
+    }
+  }
+
+  function advect(b, d, d0, u, v, dt) {
+    const dt0 = dt * GRID;
+    for (let j = 1; j <= GRID; j++) {
+      for (let i = 1; i <= GRID; i++) {
+        let x = i - dt0 * u[IX(i,j)];
+        let y = j - dt0 * v[IX(i,j)];
+        if (x < 0.5) x = 0.5; if (x > GRID + 0.5) x = GRID + 0.5;
+        if (y < 0.5) y = 0.5; if (y > GRID + 0.5) y = GRID + 0.5;
+        const i0 = Math.floor(x), i1 = i0 + 1;
+        const j0 = Math.floor(y), j1 = j0 + 1;
+        const s1 = x - i0, s0 = 1 - s1;
+        const t1 = y - j0, t0 = 1 - t1;
+        d[IX(i,j)] = s0*(t0*d0[IX(i0,j0)] + t1*d0[IX(i0,j1)]) + s1*(t0*d0[IX(i1,j0)] + t1*d0[IX(i1,j1)]);
+      }
+    }
+    setBnd(b, d);
+  }
+
+  function project(u, v, p, div) {
+    for (let j = 1; j <= GRID; j++) {
+      for (let i = 1; i <= GRID; i++) {
+        div[IX(i,j)] = -0.5 * (u[IX(i+1,j)] - u[IX(i-1,j)] + v[IX(i,j+1)] - v[IX(i,j-1)]) / GRID;
+        p[IX(i,j)] = 0;
+      }
+    }
+    setBnd(0, div); setBnd(0, p);
+    for (let k = 0; k < 4; k++) {
+      for (let j = 1; j <= GRID; j++) {
+        for (let i = 1; i <= GRID; i++) {
+          p[IX(i,j)] = (div[IX(i,j)] + p[IX(i-1,j)] + p[IX(i+1,j)] + p[IX(i,j-1)] + p[IX(i,j+1)]) / 4;
+        }
+      }
+      setBnd(0, p);
+    }
+    for (let j = 1; j <= GRID; j++) {
+      for (let i = 1; i <= GRID; i++) {
+        u[IX(i,j)] -= 0.5 * GRID * (p[IX(i+1,j)] - p[IX(i-1,j)]);
+        v[IX(i,j)] -= 0.5 * GRID * (p[IX(i,j+1)] - p[IX(i,j-1)]);
+      }
+    }
+    setBnd(1, u); setBnd(2, v);
+  }
+
+  function fluidStep(dt) {
+    const visc = 0.00001;
+    const diff = 0.00001;
+
+    // Add ambient currents — slow swirling patterns
+    for (let j = 1; j <= GRID; j++) {
+      for (let i = 1; i <= GRID; i++) {
+        const cx = i / GRID - 0.5;
+        const cy = j / GRID - 0.5;
+        vx0[IX(i,j)] += 0.3 * Math.sin(cy * 6 + time * 0.4) * dt;
+        vy0[IX(i,j)] += 0.3 * Math.cos(cx * 6 + time * 0.3) * dt;
+        // Gentle downward gravity for waterfall effect
+        vy0[IX(i,j)] += 0.05 * dt;
+      }
+    }
+
+    // Mouse force
+    if (mouseX >= 0 && prevMouseX >= 0) {
+      const gi = Math.floor((mouseX / W) * GRID) + 1;
+      const gj = Math.floor((mouseY / H) * GRID) + 1;
+      const dx = mouseX - prevMouseX;
+      const dy = mouseY - prevMouseY;
+      const radius = 3;
+      for (let dj = -radius; dj <= radius; dj++) {
+        for (let di = -radius; di <= radius; di++) {
+          const ii = gi + di, jj = gj + dj;
+          if (ii >= 1 && ii <= GRID && jj >= 1 && jj <= GRID) {
+            const dist = Math.sqrt(di*di + dj*dj);
+            const falloff = Math.max(0, 1 - dist / radius);
+            vx0[IX(ii,jj)] += dx * 0.15 * falloff;
+            vy0[IX(ii,jj)] += dy * 0.15 * falloff;
+          }
+        }
+      }
+    }
+
+    diffuse(1, vx, vx0, visc, dt);
+    diffuse(2, vy, vy0, visc, dt);
+    project(vx, vy, vx0, vy0);
+    vx0.set(vx); vy0.set(vy);
+    advect(1, vx, vx0, vx0, vy0, dt);
+    advect(2, vy, vy0, vx0, vy0, dt);
+    project(vx, vy, vx0, vy0);
+
+    // Damping
+    for (let i = 0; i < vx.length; i++) {
+      vx[i] *= 0.995;
+      vy[i] *= 0.995;
+      vx0[i] = vx[i];
+      vy0[i] = vy[i];
+    }
+  }
+
+  function getFluidVelocity(px, py) {
+    const gi = (px / W) * GRID + 1;
+    const gj = (py / H) * GRID + 1;
+    const i0 = Math.max(1, Math.min(GRID, Math.floor(gi)));
+    const j0 = Math.max(1, Math.min(GRID, Math.floor(gj)));
+    const i1 = Math.min(GRID, i0 + 1);
+    const j1 = Math.min(GRID, j0 + 1);
+    const sx = gi - i0, sy = gj - j0;
+    const fvx = (1-sx)*(1-sy)*vx[IX(i0,j0)] + sx*(1-sy)*vx[IX(i1,j0)] + (1-sx)*sy*vx[IX(i0,j1)] + sx*sy*vx[IX(i1,j1)];
+    const fvy = (1-sx)*(1-sy)*vy[IX(i0,j0)] + sx*(1-sy)*vy[IX(i1,j0)] + (1-sx)*sy*vy[IX(i0,j1)] + sx*sy*vy[IX(i1,j1)];
+    return { x: fvx, y: fvy };
+  }
+
+  // Compute targets for the phrase
+  function computePhraseTargets() {
+    ctx.save();
+    const fontSize = Math.min(W / 10, 80);
+    ctx.font = `bold ${fontSize}px monospace`;
+    const metrics = ctx.measureText(PHRASE);
+    const phraseW = metrics.width;
+    const startX = (W - phraseW) / 2;
+    const startY = H / 2;
+    ctx.restore();
+
+    // Assign first N glyphs to form the phrase
+    let charIndex = 0;
+    const charsPerLetter = Math.floor(GLYPH_COUNT * 0.15 / PHRASE.length);
+
+    // Create offscreen canvas to detect letter shapes
+    const offCanvas = document.createElement('canvas');
+    offCanvas.width = W;
+    offCanvas.height = H;
+    const offCtx = offCanvas.getContext('2d');
+    offCtx.fillStyle = '#000';
+    offCtx.fillRect(0, 0, W, H);
+    offCtx.font = `bold ${fontSize}px monospace`;
+    offCtx.fillStyle = '#fff';
+    offCtx.textBaseline = 'middle';
+    offCtx.fillText(PHRASE, startX, startY);
+
+    const imageData = offCtx.getImageData(0, 0, W, H);
+    const pixels = imageData.data;
+
+    // Sample positions within the text
+    const textPositions = [];
+    const step = 3;
+    for (let y = 0; y < H; y += step) {
+      for (let x = 0; x < W; x += step) {
+        const idx = (y * W + x) * 4;
+        if (pixels[idx] > 128) {
+          textPositions.push({ x, y });
+        }
+      }
+    }
+
+    // Shuffle
+    for (let i = textPositions.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [textPositions[i], textPositions[j]] = [textPositions[j], textPositions[i]];
+    }
+
+    // Cycle through formation
+    const cycleTime = 12; // seconds per cycle
+    const phase = (time % cycleTime) / cycleTime;
+    const forming = phase > 0.3 && phase < 0.8;
+    const formStrength = forming ?
+      Math.min(1, (phase - 0.3) / 0.1) * Math.min(1, (0.8 - phase) / 0.1) : 0;
+
+    const assignCount = Math.min(textPositions.length, Math.floor(GLYPH_COUNT * 0.4));
+    for (let i = 0; i < glyphs.length; i++) {
+      if (i < assignCount && textPositions[i]) {
+        glyphs[i].targetX = textPositions[i].x;
+        glyphs[i].targetY = textPositions[i].y;
+        glyphs[i].forming = forming;
+        glyphs[i].formStrength = formStrength;
+      } else {
+        glyphs[i].forming = false;
+        glyphs[i].formStrength = 0;
+      }
+    }
+  }
+
+  function updateGlyphs(dt) {
+    const fluidScale = W / GRID * 8;
+
+    for (let i = 0; i < glyphs.length; i++) {
+      const g = glyphs[i];
+      const fv = getFluidVelocity(g.x, g.y);
+
+      if (g.forming && g.formStrength > 0) {
+        // Attract toward target position
+        const dx = g.targetX - g.x;
+        const dy = g.targetY - g.y;
+        const dist = Math.sqrt(dx*dx + dy*dy);
+        const attract = g.formStrength * 2.0;
+        g.vx += dx * attract * dt;
+        g.vy += dy * attract * dt;
+        // Still influenced by fluid, but less
+        g.vx += fv.x * fluidScale * dt * (1 - g.formStrength * 0.7);
+        g.vy += fv.y * fluidScale * dt * (1 - g.formStrength * 0.7);
+      } else {
+        g.vx += fv.x * fluidScale * dt;
+        g.vy += fv.y * fluidScale * dt;
+      }
+
+      // Damping
+      g.vx *= 0.96;
+      g.vy *= 0.96;
+
+      g.x += g.vx;
+      g.y += g.vy;
+
+      // Rotation follows velocity
+      const speed = Math.sqrt(g.vx * g.vx + g.vy * g.vy);
+      if (speed > 0.5) {
+        const targetRot = Math.atan2(g.vy, g.vx);
+        g.rotation += (targetRot - g.rotation) * 0.1;
+      }
+
+      // Hue shifts with speed
+      g.hue = (200 + speed * 8 + Math.sin(time + g.phase) * 30) % 360;
+
+      // Life pulses
+      g.life = 0.3 + 0.5 * (0.5 + 0.5 * Math.sin(time * 0.5 + g.phase));
+
+      // Wrap around
+      if (g.x < -20) g.x = W + 20;
+      if (g.x > W + 20) g.x = -20;
+      if (g.y < -20) g.y = H + 20;
+      if (g.y > H + 20) g.y = -20;
+
+      // Occasionally change glyph
+      if (Math.random() < 0.002) {
+        g.char = ALL_GLYPHS[Math.floor(Math.random() * ALL_GLYPHS.length)];
+      }
+    }
+  }
+
+  function render() {
+    // Semi-transparent clear for trails
+    ctx.fillStyle = 'rgba(10, 10, 15, 0.15)';
+    ctx.fillRect(0, 0, W, H);
+
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+
+    for (let i = 0; i < glyphs.length; i++) {
+      const g = glyphs[i];
+      const speed = Math.sqrt(g.vx * g.vx + g.vy * g.vy);
+      const alpha = Math.min(1, g.life * (0.3 + Math.min(0.7, speed * 0.08)));
+
+      // Color: cyan-blue-magenta spectrum, brighter when fast
+      const lightness = 40 + Math.min(30, speed * 3);
+      const saturation = 70 + Math.min(30, speed * 2);
+
+      ctx.save();
+      ctx.translate(g.x, g.y);
+      ctx.rotate(g.rotation);
+
+      // Glow effect for fast-moving glyphs
+      if (speed > 3) {
+        ctx.shadowColor = `hsla(${g.hue}, 100%, 60%, ${alpha * 0.5})`;
+        ctx.shadowBlur = speed * 2;
+      }
+
+      ctx.font = `${g.size}px monospace`;
+      ctx.fillStyle = `hsla(${g.hue}, ${saturation}%, ${lightness}%, ${alpha})`;
+      ctx.fillText(g.char, 0, 0);
+
+      ctx.restore();
+    }
+
+    // Draw a subtle instruction
+    if (time < 5) {
+      const fade = Math.max(0, 1 - time / 4);
+      ctx.fillStyle = `rgba(255, 255, 255, ${fade * 0.4})`;
+      ctx.font = '14px monospace';
+      ctx.textAlign = 'center';
+      ctx.fillText('move your cursor to disturb the flow', W/2, H - 40);
+    }
+  }
+
+  let lastTime = 0;
+  function animate(timestamp) {
+    const dt = Math.min(0.05, (timestamp - lastTime) / 1000);
+    lastTime = timestamp;
+    time += dt;
+
+    fluidStep(dt);
+    computePhraseTargets();
+    updateGlyphs(dt);
+    render();
+
+    prevMouseX = mouseX;
+    prevMouseY = mouseY;
+
+    requestAnimationFrame(animate);
+  }
+
+  // Events
+  window.addEventListener('resize', resize);
+  canvas.addEventListener('mousemove', e => {
+    mouseX = e.clientX;
+    mouseY = e.clientY;
+  });
+  canvas.addEventListener('mouseleave', () => {
+    mouseX = prevMouseX = -1;
+    mouseY = prevMouseY = -1;
+  });
+  canvas.addEventListener('touchmove', e => {
+    e.preventDefault();
+    mouseX = e.touches[0].clientX;
+    mouseY = e.touches[0].clientY;
+  }, { passive: false });
+  canvas.addEventListener('touchend', () => {
+    mouseX = prevMouseX = -1;
+    mouseY = prevMouseY = -1;
+  });
+
+  resize();
+  requestAnimationFrame(animate);
+})();
+</script>
+</body>
+</html>

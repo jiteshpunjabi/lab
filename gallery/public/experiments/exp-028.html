@@ -1,0 +1,238 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Neoplastic Composition</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { width: 1280px; height: 720px; overflow: hidden; background: #f5f1e8; }
+  canvas { display: block; }
+</style>
+</head>
+<body>
+<canvas id="c" width="1280" height="720"></canvas>
+<script>
+(() => {
+  const canvas = document.getElementById('c');
+  const ctx = canvas.getContext('2d');
+  const W = 1280, H = 720;
+
+  const RED    = '#cc2027';
+  const BLUE   = '#1a3a8a';
+  const YELLOW = '#f5c518';
+  const BLACK  = '#1a1a1a';
+  const WHITE  = '#f5f1e8';
+  const LGREY  = '#e8e4db';
+  const PRIMARIES = [RED, BLUE, YELLOW]; // equal chance, Mondrian classic trio
+
+  const LINE_W = 8;
+  const MARGIN = 30;
+  const MIN_SIZE = 40;
+  const RECOMPOSE_MS = 5000;
+  const TRANSITION_MS = 1400;
+
+  let currentRects = [];
+  let targetRects = [];
+  let transStart = 0;
+  let transitioning = false;
+  let mouseX = 0.5, mouseY = 0.5;
+  let lastRecompose = 0;
+  let seed = 42;
+
+  function rng() {
+    seed = (seed * 1664525 + 1013904223) & 0xFFFFFFFF;
+    return (seed >>> 0) / 4294967295;
+  }
+
+  function subdivide(x, y, w, h, depth, maxDepth) {
+    if (depth >= maxDepth || w < MIN_SIZE * 2 || h < MIN_SIZE * 2) {
+      return [{ x, y, w, h, color: WHITE }];
+    }
+    // Always split at depth 0-2 to guarantee visual complexity
+    if (depth >= 3 && rng() > 0.82 - depth * 0.05) {
+      return [{ x, y, w, h, color: WHITE }];
+    }
+
+    const results = [];
+    // Balance vertical and horizontal splits for varied composition
+    const horizontal = w > h * 1.3 ? (rng() > 0.6) : (h > w * 1.3 ? (rng() > 0.4) : (rng() > 0.5));
+
+    if (horizontal) {
+      const lo = Math.max(MIN_SIZE, h * 0.2);
+      const hi = h - MIN_SIZE;
+      if (lo >= hi) return [{ x, y, w, h, color: WHITE }];
+      const ratio = 0.2 + rng() * 0.6 + (mouseY - 0.5) * 0.1;
+      const split = lo + (hi - lo) * Math.max(0, Math.min(1, ratio));
+      results.push(...subdivide(x, y, w, split, depth + 1, maxDepth));
+      results.push(...subdivide(x, y + split, w, h - split, depth + 1, maxDepth));
+    } else {
+      const lo = Math.max(MIN_SIZE, w * 0.2);
+      const hi = w - MIN_SIZE;
+      if (lo >= hi) return [{ x, y, w, h, color: WHITE }];
+      const ratio = 0.2 + rng() * 0.6 + (mouseX - 0.5) * 0.1;
+      const split = lo + (hi - lo) * Math.max(0, Math.min(1, ratio));
+      results.push(...subdivide(x, y, w, split, depth + 1, maxDepth));
+      results.push(...subdivide(x + split, y, w - split, h, depth + 1, maxDepth));
+    }
+    return results;
+  }
+
+  function compose() {
+    seed = Date.now() ^ ((mouseX * 9999) | 0) ^ ((mouseY * 7777) | 0);
+    const maxDepth = 4 + Math.floor(rng() * 2);
+    const rects = subdivide(MARGIN, MARGIN, W - MARGIN * 2, H - MARGIN * 2, 0, maxDepth);
+
+    // Post-process: assign colors. Guarantee 3-5 primary-colored cells.
+    const totalArea = (W - MARGIN * 2) * (H - MARGIN * 2);
+    const numColored = 2 + Math.floor(rng() * 3); // 2-4 colored cells
+
+    // Sort by area descending — color a mix of sizes
+    const indices = rects.map((_, i) => i);
+    indices.sort((a, b) => (rects[b].w * rects[b].h) - (rects[a].w * rects[a].h));
+
+    // Pick cells to color, biasing toward a mix of large and small
+    const coloredSet = new Set();
+    // Always color one large cell (top 40%)
+    const largeCut = Math.floor(indices.length * 0.4);
+    coloredSet.add(indices[Math.floor(rng() * Math.max(1, largeCut))]);
+    // Color remaining from any position
+    while (coloredSet.size < numColored && coloredSet.size < rects.length) {
+      coloredSet.add(indices[Math.floor(rng() * indices.length)]);
+    }
+
+    // Assign colors — guarantee at least 2 distinct primaries
+    const colorList = [];
+    // First two always get different colors
+    const first = Math.floor(rng() * PRIMARIES.length);
+    colorList.push(PRIMARIES[first]);
+    let second = (first + 1 + Math.floor(rng() * (PRIMARIES.length - 1))) % PRIMARIES.length;
+    colorList.push(PRIMARIES[second]);
+    // Rest are random from the full palette
+    while (colorList.length < numColored) {
+      colorList.push(PRIMARIES[Math.floor(rng() * PRIMARIES.length)]);
+    }
+    let colorIdx = 0;
+    for (const idx of coloredSet) {
+      rects[idx].color = colorList[colorIdx];
+      colorIdx++;
+    }
+
+    // Occasionally make one rect light grey
+    if (rng() > 0.5) {
+      const greyIdx = indices[Math.floor(rng() * indices.length)];
+      if (!coloredSet.has(greyIdx)) rects[greyIdx].color = LGREY;
+    }
+
+    return rects;
+  }
+
+  function beginTransition() {
+    targetRects = compose();
+    if (currentRects.length === 0) {
+      currentRects = targetRects;
+      return;
+    }
+    transStart = performance.now();
+    transitioning = true;
+  }
+
+  function ease(t) {
+    return t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
+  }
+
+  function hexRgb(hex) {
+    return [parseInt(hex.slice(1, 3), 16), parseInt(hex.slice(3, 5), 16), parseInt(hex.slice(5, 7), 16)];
+  }
+  const rgbCache = {};
+  function cachedHexRgb(hex) {
+    if (!rgbCache[hex]) rgbCache[hex] = hexRgb(hex);
+    return rgbCache[hex];
+  }
+  function lerpColor(a, b, t) {
+    const [r1, g1, b1] = cachedHexRgb(a);
+    const [r2, g2, b2] = cachedHexRgb(b);
+    return `rgb(${Math.round(r1 + (r2 - r1) * t)},${Math.round(g1 + (g2 - g1) * t)},${Math.round(b1 + (b2 - b1) * t)})`;
+  }
+  function lerp(a, b, t) { return a + (b - a) * t; }
+
+  function draw(now) {
+    requestAnimationFrame(draw);
+
+    ctx.fillStyle = WHITE;
+    ctx.fillRect(0, 0, W, H);
+
+    let rects;
+
+    if (transitioning) {
+      const elapsed = now - transStart;
+      let t = Math.min(1, elapsed / TRANSITION_MS);
+      t = ease(t);
+
+      const maxLen = Math.max(currentRects.length, targetRects.length);
+      rects = [];
+      for (let i = 0; i < maxLen; i++) {
+        const a = currentRects[i % currentRects.length];
+        const b = targetRects[i % targetRects.length];
+        rects.push({
+          x: lerp(a.x, b.x, t),
+          y: lerp(a.y, b.y, t),
+          w: lerp(a.w, b.w, t),
+          h: lerp(a.h, b.h, t),
+          color: lerpColor(a.color, b.color, t)
+        });
+      }
+      if (t >= 1) {
+        currentRects = targetRects;
+        transitioning = false;
+      }
+    } else {
+      rects = currentRects;
+    }
+
+    // Draw filled rectangles
+    for (const r of rects) {
+      ctx.fillStyle = r.color;
+      ctx.fillRect(r.x, r.y, r.w, r.h);
+    }
+
+    // Draw grid lines — thick black borders (De Stijl signature)
+    ctx.strokeStyle = BLACK;
+    ctx.lineWidth = LINE_W;
+    ctx.lineJoin = 'miter';
+    for (const r of rects) {
+      ctx.strokeRect(r.x, r.y, r.w, r.h);
+    }
+
+    // Outer frame — fully inside canvas
+    const outerLW = LINE_W * 1.5;
+    ctx.lineWidth = outerLW;
+    const inset = MARGIN / 2;
+    ctx.strokeRect(inset, inset, W - inset * 2, H - inset * 2);
+
+    // Auto-recompose
+    if (!transitioning && now - lastRecompose > RECOMPOSE_MS) {
+      lastRecompose = now;
+      beginTransition();
+    }
+  }
+
+  window.addEventListener('mousemove', (e) => {
+    mouseX = e.clientX / window.innerWidth;
+    mouseY = e.clientY / window.innerHeight;
+  });
+
+  window.addEventListener('click', () => {
+    if (!transitioning) {
+      lastRecompose = performance.now();
+      beginTransition();
+    }
+  });
+
+  beginTransition();
+  lastRecompose = performance.now();
+  requestAnimationFrame(draw);
+})();
+</script>
+</body>
+</html>

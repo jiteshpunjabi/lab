@@ -1,0 +1,509 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>exp-042 — Sediment</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { background: #0c0a0e; overflow: hidden; cursor: crosshair; }
+  canvas { display: block; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<script>
+(() => {
+  const canvas = document.getElementById('c');
+  const ctx = canvas.getContext('2d');
+  let W, H;
+
+  // Geological strata — layers of text that form terrain
+  // Each stratum has its own color palette, text content, and depth
+  const STRATA = [
+    { text: 'GRANITE BASALT MAGMA CORE IRON MANTLE SILICATE OBSIDIAN PUMICE', color: '#5a2010', accent: '#c45522', glow: '#ff6030', age: 'Hadean' },
+    { text: 'TRILOBITE AMMONITE BRACHIOPOD CORAL CRINOID GRAPTOLITE NAUTILOID', color: '#3a2818', accent: '#a07850', glow: '#d4a870', age: 'Paleozoic' },
+    { text: 'FERN CYCAD CONIFER GINKGO MOSS LICHEN SPORE POLLEN SEED FROND', color: '#1a3518', accent: '#48903a', glow: '#60c048', age: 'Mesozoic' },
+    { text: 'SAND CLAY SILT LOAM HUMUS PEAT CHALK MARL LOESS TILL DRIFT', color: '#3a3228', accent: '#9a8a70', glow: '#c8b898', age: 'Cenozoic' },
+    { text: 'RAIN WIND FROST THAW FLOOD DROUGHT STORM MIST DEW HAIL SNOW', color: '#1a1a35', accent: '#6868aa', glow: '#8888dd', age: 'Holocene' },
+  ];
+
+  // Terrain heightmap
+  const COLS = 200;
+  let terrain = [];
+  let strataMap = []; // which stratum each cell belongs to
+  let erosionMap = []; // how eroded each cell is
+
+  // Rain particles
+  const drops = [];
+  const MAX_DROPS = 300;
+
+  // Debris particles (eroded text fragments)
+  const debris = [];
+  const MAX_DEBRIS = 500;
+
+  // Mouse interaction
+  let mx = 0, my = 0;
+  let mouseDown = false;
+
+  function resize() {
+    W = canvas.width = window.innerWidth;
+    H = canvas.height = window.innerHeight;
+    initTerrain();
+  }
+
+  function initTerrain() {
+    terrain = [];
+    strataMap = [];
+    erosionMap = [];
+
+    for (let x = 0; x < COLS; x++) {
+      // Generate terrain profile using layered noise
+      const nx = x / COLS;
+      let h = 0.35; // base height (fraction of screen from bottom)
+
+      // Large-scale hills
+      h += 0.15 * Math.sin(nx * Math.PI * 2.3 + 0.7);
+      h += 0.08 * Math.sin(nx * Math.PI * 5.1 + 1.3);
+      h += 0.04 * Math.sin(nx * Math.PI * 11.7 + 2.1);
+
+      // Mesa/plateau features
+      const mesa = Math.max(0, Math.sin(nx * Math.PI * 3 - 0.5));
+      h += 0.1 * Math.pow(mesa, 4);
+
+      terrain[x] = Math.max(0.1, Math.min(0.7, h));
+
+      // Assign strata based on height within column
+      const totalH = terrain[x] * H;
+      const layers = STRATA.length;
+      strataMap[x] = [];
+      erosionMap[x] = [];
+      for (let y = 0; y < Math.ceil(totalH); y++) {
+        const depth = y / totalH;
+        const layerIdx = Math.min(layers - 1, Math.floor(depth * layers));
+        strataMap[x][y] = layerIdx;
+        erosionMap[x][y] = 0;
+      }
+    }
+  }
+
+  function spawnDrop() {
+    if (drops.length >= MAX_DROPS) return;
+    // Rain from sky, slightly wind-biased
+    const wind = Math.sin(performance.now() * 0.0003) * 0.8;
+    drops.push({
+      x: Math.random() * W,
+      y: -10,
+      vx: wind + (Math.random() - 0.5) * 0.5,
+      vy: 2.5 + Math.random() * 2,
+      life: 1,
+      size: 1 + Math.random() * 1.5,
+    });
+  }
+
+  function spawnDebris(wx, wy, stratum) {
+    if (debris.length >= MAX_DEBRIS) return;
+    const s = STRATA[stratum];
+    const words = s.text.split(' ');
+    const word = words[Math.floor(Math.random() * words.length)];
+    // Pick a fragment of the word
+    const start = Math.floor(Math.random() * word.length);
+    const len = 1 + Math.floor(Math.random() * 3);
+    const fragment = word.substring(start, start + len);
+
+    debris.push({
+      x: wx,
+      y: wy,
+      vx: (Math.random() - 0.5) * 2,
+      vy: -1 - Math.random() * 2,
+      text: fragment,
+      color: s.accent,
+      life: 1,
+      decay: 0.003 + Math.random() * 0.005,
+      size: 8 + Math.random() * 6,
+      rotation: (Math.random() - 0.5) * 0.5,
+      rotSpeed: (Math.random() - 0.5) * 0.05,
+    });
+  }
+
+  function erode(colIdx, amount) {
+    const col = Math.floor(colIdx);
+    if (col < 0 || col >= COLS) return;
+    terrain[col] -= amount;
+    if (terrain[col] < 0.05) terrain[col] = 0.05;
+  }
+
+  function getTerrainY(worldX) {
+    const col = worldX / W * COLS;
+    const c0 = Math.floor(col);
+    const c1 = Math.min(COLS - 1, c0 + 1);
+    const t = col - c0;
+    if (c0 < 0 || c0 >= COLS) return H;
+    const h0 = terrain[c0] || 0;
+    const h1 = terrain[c1] || 0;
+    return H - (h0 + (h1 - h0) * t) * H;
+  }
+
+  function getStratum(worldX, worldY) {
+    const col = Math.floor(worldX / W * COLS);
+    if (col < 0 || col >= COLS) return 0;
+    const surfaceY = H - terrain[col] * H;
+    const depth = worldY - surfaceY;
+    const totalH = terrain[col] * H;
+    if (totalH <= 0) return 0;
+    const relDepth = depth / totalH;
+    return Math.min(STRATA.length - 1, Math.max(0, Math.floor(relDepth * STRATA.length)));
+  }
+
+  function update() {
+    // Spawn rain
+    for (let i = 0; i < 4; i++) spawnDrop();
+
+    // Mouse creates a concentrated rain burst
+    if (mouseDown) {
+      for (let i = 0; i < 8; i++) {
+        drops.push({
+          x: mx + (Math.random() - 0.5) * 60,
+          y: my - 30,
+          vx: (Math.random() - 0.5) * 2,
+          vy: 3 + Math.random() * 3,
+          life: 1,
+          size: 2 + Math.random() * 2,
+        });
+      }
+    }
+
+    // Update rain
+    for (let i = drops.length - 1; i >= 0; i--) {
+      const d = drops[i];
+      d.x += d.vx;
+      d.y += d.vy;
+      d.vy += 0.08; // gravity
+
+      // Check terrain collision
+      const surfaceY = getTerrainY(d.x);
+      if (d.y >= surfaceY) {
+        // Erode terrain at impact
+        const col = Math.floor(d.x / W * COLS);
+        const erosionAmt = 0.0003 * d.vy;
+        erode(col, erosionAmt);
+
+        // Splash — spawn debris and visual splash
+        const stratum = getStratum(d.x, d.y);
+        if (Math.random() < 0.15) {
+          spawnDebris(d.x, surfaceY, stratum);
+        }
+        if (Math.random() < 0.3) {
+          spawnSplash(d.x, surfaceY);
+        }
+
+        // Rain becomes surface runoff — slide downhill
+        if (Math.random() < 0.4) {
+          const leftCol = Math.max(0, col - 1);
+          const rightCol = Math.min(COLS - 1, col + 1);
+          const leftH = terrain[leftCol] || 0;
+          const rightH = terrain[rightCol] || 0;
+          if (leftH < rightH) {
+            erode(leftCol, erosionAmt * 0.5);
+          } else {
+            erode(rightCol, erosionAmt * 0.5);
+          }
+        }
+
+        drops.splice(i, 1);
+        continue;
+      }
+
+      // Off-screen
+      if (d.y > H + 20 || d.x < -20 || d.x > W + 20) {
+        drops.splice(i, 1);
+        continue;
+      }
+    }
+
+    // Update debris
+    for (let i = debris.length - 1; i >= 0; i--) {
+      const d = debris[i];
+      d.x += d.vx;
+      d.y += d.vy;
+      d.vy += 0.06; // gravity
+      d.vx *= 0.99;
+      d.rotation += d.rotSpeed;
+      d.life -= d.decay;
+
+      // Debris settles on terrain
+      const surfaceY = getTerrainY(d.x);
+      if (d.y >= surfaceY && d.vy > 0) {
+        d.vy *= -0.3;
+        d.vx *= 0.7;
+        d.y = surfaceY;
+        if (Math.abs(d.vy) < 0.5) {
+          d.vy = 0;
+          d.vx *= 0.95;
+          d.decay *= 1.5; // fade faster once settled
+        }
+      }
+
+      if (d.life <= 0 || d.y > H + 20) {
+        debris.splice(i, 1);
+      }
+    }
+  }
+
+  function drawTerrain() {
+    const colW = W / COLS;
+
+    for (let x = 0; x < COLS; x++) {
+      const h = terrain[x] * H;
+      const baseY = H - h;
+
+      // Draw each stratum layer
+      const layers = STRATA.length;
+      const layerH = h / layers;
+
+      for (let l = 0; l < layers; l++) {
+        const s = STRATA[l];
+        const ly = baseY + l * layerH;
+
+        // Fill stratum band
+        ctx.fillStyle = s.color;
+        ctx.fillRect(x * colW, ly, colW + 1, layerH + 1);
+
+        // Draw text within stratum — geological text as texture
+        const words = s.text.split(' ');
+        const fontSize = 11;
+        ctx.font = `bold ${fontSize}px monospace`;
+
+        // Deterministic text placement based on position
+        const seed = x * 7 + l * 31;
+        const wordIdx = seed % words.length;
+        const word = words[wordIdx];
+
+        // Surface glow — text near the surface of this stratum is brighter
+        const distFromSurface = l === 0 ? 0 : l;
+
+        // Stagger text rows within band
+        const rows = Math.max(1, Math.floor(layerH / (fontSize + 2)));
+        for (let r = 0; r < rows; r++) {
+          const ty = ly + r * (fontSize + 2) + fontSize;
+          if (ty > H) break;
+          const charOffset = (seed + r * 13) % word.length;
+          const displayText = word.substring(charOffset) + ' ' + words[(wordIdx + r + 1) % words.length];
+
+          // Brighter near stratum boundaries
+          const rowFrac = r / rows;
+          const boundaryGlow = (rowFrac < 0.15 || rowFrac > 0.85) ? 0.8 : 0.5;
+          ctx.globalAlpha = boundaryGlow + 0.15 * Math.sin(x * 0.3 + l);
+          ctx.fillStyle = s.accent;
+          ctx.fillText(displayText, x * colW, ty);
+
+          // Glow effect on boundary rows
+          if (rowFrac < 0.1) {
+            ctx.globalAlpha = 0.15;
+            ctx.fillStyle = s.glow;
+            ctx.fillText(displayText, x * colW, ty);
+          }
+        }
+        ctx.globalAlpha = 1;
+      }
+    }
+
+    // Draw stratum boundary lines (geological strata lines)
+    ctx.strokeStyle = 'rgba(255,255,255,0.06)';
+    ctx.lineWidth = 0.5;
+    for (let l = 1; l < STRATA.length; l++) {
+      ctx.beginPath();
+      for (let x = 0; x < COLS; x++) {
+        const h = terrain[x] * H;
+        const baseY = H - h;
+        const layerH = h / STRATA.length;
+        const ly = baseY + l * layerH;
+        if (x === 0) ctx.moveTo(x * colW, ly);
+        else ctx.lineTo(x * colW, ly);
+      }
+      ctx.stroke();
+    }
+
+    // Surface line — brighter
+    ctx.strokeStyle = 'rgba(180,160,140,0.3)';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    for (let x = 0; x < COLS; x++) {
+      const h = terrain[x] * H;
+      const baseY = H - h;
+      if (x === 0) ctx.moveTo(x * colW, baseY);
+      else ctx.lineTo(x * colW, baseY);
+    }
+    ctx.stroke();
+  }
+
+  function drawSky() {
+    // Dark sky with subtle gradient
+    const grad = ctx.createLinearGradient(0, 0, 0, H * 0.5);
+    grad.addColorStop(0, '#08060c');
+    grad.addColorStop(1, '#12101a');
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, W, H * 0.6);
+
+    // Age labels in sky — geological time
+    ctx.font = '10px monospace';
+    ctx.fillStyle = 'rgba(100,90,80,0.15)';
+    const t = performance.now() * 0.00005;
+    for (let i = 0; i < STRATA.length; i++) {
+      const x = (i * 0.2 + t) % 1.2 * W - 0.1 * W;
+      ctx.fillText(STRATA[i].age, x, 30 + i * 15);
+    }
+  }
+
+  function drawRain() {
+    ctx.lineWidth = 1;
+    for (const d of drops) {
+      ctx.globalAlpha = d.life * 0.5;
+      ctx.strokeStyle = `rgba(150,170,220,${0.3 * d.life})`;
+      ctx.beginPath();
+      ctx.moveTo(d.x, d.y);
+      ctx.lineTo(d.x - d.vx * 3, d.y - d.vy * 3);
+      ctx.stroke();
+    }
+    ctx.globalAlpha = 1;
+  }
+
+  // Splash particles
+  const splashes = [];
+  function spawnSplash(x, y) {
+    for (let i = 0; i < 3; i++) {
+      splashes.push({
+        x, y,
+        vx: (Math.random() - 0.5) * 3,
+        vy: -1 - Math.random() * 2,
+        life: 1,
+        decay: 0.04 + Math.random() * 0.03,
+      });
+    }
+    if (splashes.length > 200) splashes.splice(0, 20);
+  }
+  function updateSplashes() {
+    for (let i = splashes.length - 1; i >= 0; i--) {
+      const s = splashes[i];
+      s.x += s.vx; s.y += s.vy;
+      s.vy += 0.1;
+      s.life -= s.decay;
+      if (s.life <= 0) splashes.splice(i, 1);
+    }
+  }
+  function drawSplashes() {
+    ctx.fillStyle = 'rgba(180,200,240,0.6)';
+    for (const s of splashes) {
+      ctx.globalAlpha = s.life * 0.5;
+      ctx.fillRect(s.x, s.y, 1.5, 1.5);
+    }
+    ctx.globalAlpha = 1;
+  }
+
+  function drawDebris() {
+    for (const d of debris) {
+      ctx.save();
+      ctx.translate(d.x, d.y);
+      ctx.rotate(d.rotation);
+      ctx.font = `${d.size}px monospace`;
+      ctx.fillStyle = d.color;
+      ctx.globalAlpha = d.life * 0.8;
+      ctx.fillText(d.text, 0, 0);
+      ctx.restore();
+    }
+    ctx.globalAlpha = 1;
+  }
+
+  function drawWaterPool() {
+    // Find the lowest valley and fill with translucent water
+    const colW = W / COLS;
+    let minH = 1;
+    for (let x = 0; x < COLS; x++) minH = Math.min(minH, terrain[x]);
+    const waterLevel = minH + 0.03;
+    const waterY = H - waterLevel * H;
+
+    // Water surface
+    const t = performance.now() * 0.001;
+    ctx.fillStyle = 'rgba(30,50,90,0.3)';
+    ctx.beginPath();
+    ctx.moveTo(0, H);
+    for (let x = 0; x < COLS; x++) {
+      const surfY = H - terrain[x] * H;
+      const wY = H - waterLevel * H + Math.sin(x * 0.1 + t) * 2;
+      if (surfY > wY) {
+        ctx.lineTo(x * colW, wY);
+      } else {
+        ctx.lineTo(x * colW, surfY);
+      }
+    }
+    ctx.lineTo(W, H);
+    ctx.closePath();
+    ctx.fill();
+  }
+
+  function drawMist() {
+    // Subtle fog rising from valleys
+    const t = performance.now() * 0.0005;
+    const colW = W / COLS;
+    ctx.globalAlpha = 0.06;
+    for (let i = 0; i < 15; i++) {
+      const cx = (Math.sin(t + i * 2.1) * 0.4 + 0.5) * W;
+      const col = Math.floor(cx / W * COLS);
+      if (col < 0 || col >= COLS) continue;
+      const surfY = H - terrain[Math.min(COLS-1, Math.max(0, col))] * H;
+      const grad = ctx.createRadialGradient(cx, surfY, 0, cx, surfY - 40, 80 + 30 * Math.sin(t * 2 + i));
+      grad.addColorStop(0, 'rgba(150,160,180,0.4)');
+      grad.addColorStop(1, 'rgba(150,160,180,0)');
+      ctx.fillStyle = grad;
+      ctx.fillRect(cx - 100, surfY - 100, 200, 120);
+    }
+    ctx.globalAlpha = 1;
+  }
+
+  function drawErosionInfo() {
+    // Show current erosion stats subtly
+    ctx.font = '9px monospace';
+    ctx.fillStyle = 'rgba(100,90,80,0.2)';
+    const totalEroded = terrain.reduce((sum, h, i) => {
+      const original = 0.35 + 0.15 * Math.sin(i / COLS * Math.PI * 2.3 + 0.7)
+        + 0.08 * Math.sin(i / COLS * Math.PI * 5.1 + 1.3);
+      return sum + Math.max(0, original - h);
+    }, 0);
+    ctx.fillText(`erosion: ${totalEroded.toFixed(3)}`, 12, H - 12);
+  }
+
+  function draw() {
+    ctx.clearRect(0, 0, W, H);
+    ctx.fillStyle = '#0c0a0e';
+    ctx.fillRect(0, 0, W, H);
+
+    drawSky();
+    drawTerrain();
+    drawRain();
+    drawSplashes();
+    drawDebris();
+    drawWaterPool();
+    drawMist();
+    drawErosionInfo();
+  }
+
+  function loop() {
+    update();
+    updateSplashes();
+    draw();
+    requestAnimationFrame(loop);
+  }
+
+  // Events
+  window.addEventListener('resize', resize);
+  canvas.addEventListener('mousemove', (e) => { mx = e.clientX; my = e.clientY; });
+  canvas.addEventListener('mousedown', () => { mouseDown = true; });
+  canvas.addEventListener('mouseup', () => { mouseDown = false; });
+  canvas.addEventListener('mouseleave', () => { mouseDown = false; });
+
+  resize();
+  loop();
+})();
+</script>
+</body>
+</html>

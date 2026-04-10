@@ -1,0 +1,374 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>exp-024 — Stained Glass Morphogenesis</title>
+<style>
+  * { margin: 0; padding: 0; }
+  body { overflow: hidden; background: #000; }
+  canvas { display: block; width: 100vw; height: 100vh; }
+  #info {
+    position: fixed; bottom: 12px; left: 12px;
+    color: rgba(255,255,255,0.35); font: 11px/1.4 monospace;
+    pointer-events: none; z-index: 10;
+  }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="info">click to seed · space to cycle patterns</div>
+<script>
+(() => {
+  const canvas = document.getElementById('c');
+  const gl = canvas.getContext('webgl', { preserveDrawingBuffer: true });
+  canvas.width = 1280; canvas.height = 720;
+  gl.viewport(0, 0, canvas.width, canvas.height);
+
+  const ext = gl.getExtension('OES_texture_float');
+  const useFloat = !!ext;
+
+  const SIM_W = 512, SIM_H = 288; // Higher res for detail
+
+  // Gray-Scott presets from Morphogenesis parent
+  const presets = [
+    { name: 'coral',   f: 0.0545, k: 0.062  },
+    { name: 'mitosis', f: 0.0367, k: 0.0649 },
+    { name: 'maze',    f: 0.029,  k: 0.057  },
+    { name: 'spots',   f: 0.030,  k: 0.062  },
+    { name: 'worms',   f: 0.078,  k: 0.061  },
+    { name: 'pulsing', f: 0.014,  k: 0.054  },
+  ];
+  let presetIdx = 0;
+
+  // --- Shaders ---
+  const quadVS = `
+  attribute vec2 a_pos;
+  varying vec2 v_uv;
+  void main() {
+    v_uv = a_pos * 0.5 + 0.5;
+    gl_Position = vec4(a_pos, 0.0, 1.0);
+  }`;
+
+  // Gray-Scott reaction-diffusion simulation shader
+  const simFS = `
+  precision highp float;
+  varying vec2 v_uv;
+  uniform sampler2D u_state;
+  uniform vec2 u_simSize;
+  uniform float u_feed;
+  uniform float u_kill;
+  uniform vec2 u_mouse;
+  uniform float u_mouseDown;
+
+  void main() {
+    vec2 texel = 1.0 / u_simSize;
+    vec2 uv = v_uv;
+
+    // Current state: R = chemical A, G = chemical B
+    vec4 cur = texture2D(u_state, uv);
+    float a = cur.r;
+    float b = cur.g;
+
+    // 9-point weighted Laplacian (toroidal)
+    float lA = 0.0, lB = 0.0;
+
+    // Weights: center=-1, cardinal=0.2, diagonal=0.05
+    vec2 offsets[8];
+    offsets[0] = vec2(-1.0, -1.0); // diag
+    offsets[1] = vec2( 0.0, -1.0); // cardinal
+    offsets[2] = vec2( 1.0, -1.0); // diag
+    offsets[3] = vec2(-1.0,  0.0); // cardinal
+    offsets[4] = vec2( 1.0,  0.0); // cardinal
+    offsets[5] = vec2(-1.0,  1.0); // diag
+    offsets[6] = vec2( 0.0,  1.0); // cardinal
+    offsets[7] = vec2( 1.0,  1.0); // diag
+
+    float weights[8];
+    weights[0] = 0.05; weights[1] = 0.2; weights[2] = 0.05;
+    weights[3] = 0.2;                     weights[4] = 0.2;
+    weights[5] = 0.05; weights[6] = 0.2;  weights[7] = 0.05;
+
+    for (int i = 0; i < 8; i++) {
+      vec2 sUV = fract(uv + offsets[i] * texel);
+      vec4 s = texture2D(u_state, sUV);
+      lA += s.r * weights[i];
+      lB += s.g * weights[i];
+    }
+    lA -= a;
+    lB -= b;
+
+    float dA = 1.0, dB = 0.5;
+    float abb = a * b * b;
+    float nextA = a + dA * lA - abb + u_feed * (1.0 - a);
+    float nextB = b + dB * lB + abb - (u_kill + u_feed) * b;
+
+    nextA = clamp(nextA, 0.0, 1.0);
+    nextB = clamp(nextB, 0.0, 1.0);
+
+    // Mouse seeding
+    if (u_mouseDown > 0.5) {
+      vec2 diff = (uv - u_mouse) * u_simSize;
+      float d = length(diff);
+      if (d < 8.0) {
+        float w = exp(-d * d / 20.0);
+        nextA = mix(nextA, 0.0, w);
+        nextB = mix(nextB, 1.0, w);
+      }
+    }
+
+    gl_FragColor = vec4(nextA, nextB, 0.0, 1.0);
+  }`;
+
+  // Display shader: Chromatic Tessellation aesthetic applied to reaction-diffusion
+  const displayFS = `
+  precision highp float;
+  varying vec2 v_uv;
+  uniform sampler2D u_state;
+  uniform float u_time;
+  uniform vec2 u_resolution;
+  uniform vec2 u_mouse;
+
+  vec3 hsv2rgb(float h, float s, float v) {
+    vec3 c = vec3(h * 6.0, s, v);
+    vec3 rgb = clamp(abs(mod(c.x + vec3(0.0, 4.0, 2.0), 6.0) - 3.0) - 1.0, 0.0, 1.0);
+    return v * mix(vec3(1.0), rgb, s);
+  }
+
+  void main() {
+    vec2 uv = v_uv;
+    vec2 p = (gl_FragCoord.xy - 0.5 * u_resolution) / min(u_resolution.x, u_resolution.y);
+    vec2 m = (u_mouse - 0.5 * u_resolution) / min(u_resolution.x, u_resolution.y);
+    float md = length(p - m);
+    float t = u_time * 0.4;
+
+    // Read reaction-diffusion state
+    vec4 rd = texture2D(u_state, uv);
+    float a = rd.r;
+    float b = rd.g;
+
+    // Stained-glass tessellation from Chromatic Tessellation parent
+    // but modulated by the reaction-diffusion field
+    float s1 = sin(p.x * 8.0 + t + b * 6.0) * cos(p.y * 8.0 - t * 0.7 + a * 4.0);
+    float s2 = sin((p.x * 0.866 + p.y * 0.5) * 10.0 + t * 1.3 + b * 5.0) *
+               cos((p.x * 0.5 - p.y * 0.866) * 10.0 - t * 0.9 + a * 3.0);
+    float s3 = sin(length(p) * 12.0 - t * 2.0 + b * 8.0) * 0.5;
+
+    float cell = s1 + s2 + s3;
+
+    // Edge detection on tessellation — the leaded glass lines
+    float edge = 1.0 - smoothstep(0.0, 0.12 + b * 0.1, abs(cell));
+
+    // Edge detection on RD field — Turing pattern boundaries glow
+    float rdEdgeX = abs(texture2D(u_state, uv + vec2(0.003, 0.0)).g - b);
+    float rdEdgeY = abs(texture2D(u_state, uv + vec2(0.0, 0.003)).g - b);
+    float rdEdge = (rdEdgeX + rdEdgeY) * 8.0;
+
+    // Color: hue from angular position + RD concentration shifts it
+    float hue = fract(atan(p.y, p.x) / 6.2832 + t * 0.08 + b * 0.4 + md * 0.15);
+    float sat = 0.65 + 0.35 * sin(cell * 3.14 + b * 2.0);
+    float val = 0.3 + 0.6 * (0.5 + 0.5 * sin(cell * 2.0 + t)) * (0.3 + b * 1.4);
+
+    // B concentration drives warmth: high B = coral/magenta, low B = deep blue/violet
+    float warmShift = b * 0.3;
+    hue = fract(hue + warmShift);
+
+    vec3 color = hsv2rgb(hue, sat, val);
+
+    // Leaded glass edges: bright warm white
+    color = mix(color, vec3(1.0, 0.92, 0.75), edge * 0.6);
+
+    // RD boundary glow: cyan-white luminous edges around Turing patterns
+    vec3 glowColor = vec3(0.6, 0.95, 1.0);
+    color = mix(color, glowColor, rdEdge * 0.5);
+
+    // Radial glow from mouse
+    float glow = exp(-md * 3.5) * 0.25;
+    color += vec3(glow, glow * 0.5, glow * 0.15);
+
+    // Deep base so nothing goes black
+    color = max(color, vec3(0.06, 0.03, 0.08));
+
+    // Overall intensity boost for B-rich regions
+    color *= 0.9 + b * 0.5;
+
+    gl_FragColor = vec4(color, 1.0);
+  }`;
+
+  // --- WebGL helpers ---
+  function compileShader(src, type) {
+    const s = gl.createShader(type);
+    gl.shaderSource(s, src);
+    gl.compileShader(s);
+    if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) console.error(gl.getShaderInfoLog(s));
+    return s;
+  }
+  function createProgram(vsSrc, fsSrc) {
+    const vs = compileShader(vsSrc, gl.VERTEX_SHADER);
+    const fs = compileShader(fsSrc, gl.FRAGMENT_SHADER);
+    const prog = gl.createProgram();
+    gl.attachShader(prog, vs); gl.attachShader(prog, fs);
+    gl.linkProgram(prog);
+    if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) console.error(gl.getProgramInfoLog(prog));
+    return prog;
+  }
+
+  const quadBuf = gl.createBuffer();
+  gl.bindBuffer(gl.ARRAY_BUFFER, quadBuf);
+  gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1,-1,1,-1,-1,1,-1,1,1,-1,1,1]), gl.STATIC_DRAW);
+
+  const simProg = createProgram(quadVS, simFS);
+  const displayProg = createProgram(quadVS, displayFS);
+
+  const simU = {
+    state: gl.getUniformLocation(simProg, 'u_state'),
+    simSize: gl.getUniformLocation(simProg, 'u_simSize'),
+    feed: gl.getUniformLocation(simProg, 'u_feed'),
+    kill: gl.getUniformLocation(simProg, 'u_kill'),
+    mouse: gl.getUniformLocation(simProg, 'u_mouse'),
+    mouseDown: gl.getUniformLocation(simProg, 'u_mouseDown'),
+  };
+  const dispU = {
+    state: gl.getUniformLocation(displayProg, 'u_state'),
+    time: gl.getUniformLocation(displayProg, 'u_time'),
+    resolution: gl.getUniformLocation(displayProg, 'u_resolution'),
+    mouse: gl.getUniformLocation(displayProg, 'u_mouse'),
+  };
+
+  function createStateTex() {
+    const tex = gl.createTexture();
+    gl.bindTexture(gl.TEXTURE_2D, tex);
+    if (useFloat) gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, SIM_W, SIM_H, 0, gl.RGBA, gl.FLOAT, null);
+    else gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, SIM_W, SIM_H, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.REPEAT);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.REPEAT);
+    return tex;
+  }
+  function createFBO(tex) {
+    const fbo = gl.createFramebuffer();
+    gl.bindFramebuffer(gl.FRAMEBUFFER, fbo);
+    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, tex, 0);
+    return fbo;
+  }
+
+  const texA = createStateTex(), texB = createStateTex();
+  const fboA = createFBO(texA), fboB = createFBO(texB);
+
+  function seedState() {
+    const n = SIM_W * SIM_H;
+    const data = useFloat ? new Float32Array(n * 4) : new Uint8Array(n * 4);
+    const max = useFloat ? 1.0 : 255;
+
+    // Fill with A=1, B=0
+    for (let i = 0; i < n; i++) {
+      data[i*4] = max;     // A = 1
+      data[i*4+1] = 0;     // B = 0
+      data[i*4+2] = 0;
+      data[i*4+3] = max;
+    }
+
+    // Seed circular patches of B
+    function addSeed(cx, cy, r) {
+      for (let dy = -r; dy <= r; dy++) {
+        for (let dx = -r; dx <= r; dx++) {
+          if (dx*dx + dy*dy > r*r) continue;
+          const x = ((cx+dx)%SIM_W+SIM_W)%SIM_W;
+          const y = ((cy+dy)%SIM_H+SIM_H)%SIM_H;
+          const i = y * SIM_W + x;
+          data[i*4] = 0;
+          data[i*4+1] = max;
+        }
+      }
+    }
+
+    for (let n = 0; n < 20; n++) {
+      addSeed(
+        Math.floor(Math.random() * (SIM_W - 20) + 10),
+        Math.floor(Math.random() * (SIM_H - 20) + 10),
+        Math.floor(Math.random() * 8 + 4)
+      );
+    }
+    // Large central seed
+    addSeed(SIM_W/2|0, SIM_H/2|0, 15);
+
+    gl.bindTexture(gl.TEXTURE_2D, texA);
+    if (useFloat) gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, SIM_W, SIM_H, 0, gl.RGBA, gl.FLOAT, data);
+    else gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, SIM_W, SIM_H, 0, gl.RGBA, gl.UNSIGNED_BYTE, data);
+  }
+  seedState();
+
+  let mouseX = 0.5, mouseY = 0.5, mousePxX = 640, mousePxY = 360, mouseDown = 0;
+
+  canvas.addEventListener('mousemove', e => {
+    mouseX = e.clientX / canvas.clientWidth;
+    mouseY = 1.0 - e.clientY / canvas.clientHeight;
+    mousePxX = e.clientX / canvas.clientWidth * canvas.width;
+    mousePxY = (1.0 - e.clientY / canvas.clientHeight) * canvas.height;
+  });
+  canvas.addEventListener('mousedown', () => { mouseDown = 1; });
+  canvas.addEventListener('mouseup', () => { mouseDown = 0; });
+
+  document.addEventListener('keydown', e => {
+    if (e.code === 'Space') {
+      e.preventDefault();
+      presetIdx = (presetIdx + 1) % presets.length;
+      seedState();
+      document.getElementById('info').textContent =
+        `pattern: ${presets[presetIdx].name} · click to seed · space to cycle`;
+    }
+  });
+
+  let readTex = texA, writeTex = texB, readFBO = fboA, writeFBO = fboB;
+
+  function drawQuad(prog) {
+    const aPos = gl.getAttribLocation(prog, 'a_pos');
+    gl.bindBuffer(gl.ARRAY_BUFFER, quadBuf);
+    gl.enableVertexAttribArray(aPos);
+    gl.vertexAttribPointer(aPos, 2, gl.FLOAT, false, 0, 0);
+    gl.drawArrays(gl.TRIANGLES, 0, 6);
+  }
+
+  function frame(t) {
+    const time = t * 0.001;
+    const preset = presets[presetIdx];
+
+    // Run multiple RD steps per frame
+    for (let step = 0; step < 8; step++) {
+      gl.bindFramebuffer(gl.FRAMEBUFFER, writeFBO);
+      gl.viewport(0, 0, SIM_W, SIM_H);
+      gl.useProgram(simProg);
+      gl.activeTexture(gl.TEXTURE0);
+      gl.bindTexture(gl.TEXTURE_2D, readTex);
+      gl.uniform1i(simU.state, 0);
+      gl.uniform2f(simU.simSize, SIM_W, SIM_H);
+      gl.uniform1f(simU.feed, preset.f);
+      gl.uniform1f(simU.kill, preset.k);
+      gl.uniform2f(simU.mouse, mouseX, mouseY);
+      gl.uniform1f(simU.mouseDown, step === 0 ? mouseDown : 0);
+      drawQuad(simProg);
+      [readTex, writeTex] = [writeTex, readTex];
+      [readFBO, writeFBO] = [writeFBO, readFBO];
+    }
+
+    // Display
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    gl.viewport(0, 0, canvas.width, canvas.height);
+    gl.useProgram(displayProg);
+    gl.activeTexture(gl.TEXTURE0);
+    gl.bindTexture(gl.TEXTURE_2D, readTex);
+    gl.uniform1i(dispU.state, 0);
+    gl.uniform1f(dispU.time, time);
+    gl.uniform2f(dispU.resolution, canvas.width, canvas.height);
+    gl.uniform2f(dispU.mouse, mousePxX, mousePxY);
+    drawQuad(displayProg);
+
+    requestAnimationFrame(frame);
+  }
+
+  requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,21 @@
+{
+  "name": "lab",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsc",
+    "loop": "npx tsx engine/loop.ts",
+    "loop:once": "npx tsx engine/loop.ts --once",
+    "build-index": "npx tsx engine/build-index.ts",
+    "deploy": "bash scripts/deploy.sh"
+  },
+  "dependencies": {
+    "puppeteer": "^24.0.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.7.0",
+    "tsx": "^4.21.0",
+    "@types/node": "^22.0.0"
+  }
+}

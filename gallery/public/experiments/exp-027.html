@@ -1,0 +1,389 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Infinite Corridor</title>
+<style>
+* { margin: 0; padding: 0; }
+html, body { width: 100%; height: 100%; overflow: hidden; background: #000; }
+canvas { display: block; width: 100%; height: 100%; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<script>
+// Non-Euclidean impossible corridor. Canvas 2D raycaster with portal teleportation,
+// multi-gravity corridors, and Escher-like looping staircases.
+// The viewer drifts endlessly through a space that cannot exist.
+
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d');
+
+let W, H;
+function resize() {
+  W = canvas.width = window.innerWidth;
+  H = canvas.height = window.innerHeight;
+}
+resize();
+window.addEventListener('resize', resize);
+
+let mouseX = 0.5, mouseY = 0.5;
+window.addEventListener('mousemove', e => {
+  mouseX = e.clientX / W;
+  mouseY = e.clientY / H;
+});
+
+// Player
+const player = { x: 15.5, y: 8.5, angle: 0, pitch: 0 };
+
+// Map
+const MW = 64, MH = 64;
+const map = new Uint8Array(MW * MH).fill(1);
+
+function set(x, y, v) {
+  if (x >= 0 && x < MW && y >= 0 && y < MH) map[y * MW + x] = v;
+}
+function get(x, y) {
+  if (x < 0 || x >= MW || y < 0 || y >= MH) return 1;
+  return map[y * MW + x];
+}
+
+// Carve wide corridors (3 tiles wide)
+function hCorridor(y, x0, x1) {
+  for (let x = x0; x <= x1; x++) { set(x, y-1, 0); set(x, y, 0); set(x, y+1, 0); }
+}
+function vCorridor(x, y0, y1) {
+  for (let y = y0; y <= y1; y++) { set(x-1, y, 0); set(x, y, 0); set(x+1, y, 0); }
+}
+function room(cx, cy, r) {
+  for (let dy = -r; dy <= r; dy++)
+    for (let dx = -r; dx <= r; dx++)
+      set(cx + dx, cy + dy, 0);
+}
+
+// Grid of corridors
+const gridSpacing = 12;
+const gridPositions = [];
+for (let gx = 8; gx < MW - 4; gx += gridSpacing) gridPositions.push(gx);
+
+const gridY = [];
+for (let gy = 8; gy < MH - 4; gy += gridSpacing) gridY.push(gy);
+
+// Horizontal corridors
+gridY.forEach(gy => hCorridor(gy, 4, MW - 5));
+// Vertical corridors
+gridPositions.forEach(gx => vCorridor(gx, 4, MH - 5));
+
+// Rooms at intersections
+const rooms = [];
+gridPositions.forEach(gx => {
+  gridY.forEach(gy => {
+    room(gx, gy, 3);
+    rooms.push({ x: gx, y: gy });
+  });
+});
+
+// Extra diagonal passages (impossible feeling)
+for (let i = 0; i < 8; i++) {
+  const r1 = rooms[Math.floor(Math.random() * rooms.length)];
+  const r2 = rooms[Math.floor(Math.random() * rooms.length)];
+  const steps = 30;
+  for (let s = 0; s < steps; s++) {
+    const t = s / steps;
+    const x = Math.round(r1.x + (r2.x - r1.x) * t);
+    const y = Math.round(r1.y + (r2.y - r1.y) * t);
+    set(x, y, 0); set(x+1, y, 0); set(x, y+1, 0);
+  }
+}
+
+// Wall color: varies by position creating distinct zones
+function wallColor(mx, my, side, dist) {
+  const zx = (mx / MW * 4) | 0;
+  const zy = (my / MH * 4) | 0;
+  const zone = (zx * 3 + zy * 7) % 9;
+  const bases = [
+    [140, 60, 220], [60, 140, 240], [160, 50, 130],
+    [50, 140, 180], [180, 70, 120], [70, 100, 200],
+    [140, 70, 200], [60, 150, 150], [150, 85, 170]
+  ];
+  const c = bases[zone];
+  // Darken by side
+  const sideMul = side === 0 ? 1.0 : 0.7;
+  const fog = Math.max(0, 1 - dist * 0.025);
+  const r = (c[0] * sideMul * fog) | 0;
+  const g = (c[1] * sideMul * fog) | 0;
+  const b = (c[2] * sideMul * fog) | 0;
+  return `rgb(${r},${g},${b})`;
+}
+
+// Lights at room centers
+const lights = rooms.map((r, i) => ({
+  x: r.x + 0.5, y: r.y + 0.5,
+  hue: (i * 47 + 200) % 360,
+  intensity: 0.9 + Math.random() * 0.5,
+  phase: Math.random() * Math.PI * 2
+}));
+
+// Portal pairs: walking through one teleports to other (non-Euclidean)
+const portalPairs = [];
+for (let i = 0; i < rooms.length - 1; i += 3) {
+  const j = (i + Math.floor(rooms.length / 2)) % rooms.length;
+  if (i !== j) {
+    portalPairs.push({
+      x1: rooms[i].x + 0.5, y1: rooms[i].y - 2.5,
+      x2: rooms[j].x + 0.5, y2: rooms[j].y + 2.5,
+      hue: (i * 60) % 360
+    });
+  }
+}
+
+// Floating glyphs in rooms
+const glyphs = [];
+const glyphChars = '\u25C6\u25C7\u25CA\u2B21\u2B22\u2B23\u25CB\u25CF\u2606\u2605\u2726\u2727\u2728\u273A\u2756';
+rooms.forEach((r, i) => {
+  for (let k = 0; k < 5; k++) {
+    glyphs.push({
+      x: r.x + (Math.random() - 0.5) * 5,
+      y: r.y + (Math.random() - 0.5) * 5,
+      z: 0.15 + Math.random() * 0.7,
+      hue: (i * 47 + k * 72) % 360,
+      size: 6 + Math.random() * 8,
+      phase: Math.random() * Math.PI * 2,
+      char: glyphChars[Math.floor(Math.random() * glyphChars.length)]
+    });
+  }
+});
+
+// DDA raycast
+function castRay(ox, oy, angle) {
+  const dx = Math.cos(angle), dy = Math.sin(angle);
+  let mx = ox | 0, my = oy | 0;
+  const sx = dx >= 0 ? 1 : -1, sy = dy >= 0 ? 1 : -1;
+  let tmx = dx >= 0 ? (mx + 1 - ox) / dx : (ox - mx) / (-dx);
+  let tmy = dy >= 0 ? (my + 1 - oy) / dy : (oy - my) / (-dy);
+  const tdx = Math.abs(1 / dx), tdy = Math.abs(1 / dy);
+  let side = 0;
+  for (let i = 0; i < 80; i++) {
+    if (tmx < tmy) { tmx += tdx; mx += sx; side = 0; }
+    else { tmy += tdy; my += sy; side = 1; }
+    if (get(mx, my) !== 0) {
+      const d = side === 0
+        ? (mx - ox + (1 - sx) / 2) / dx
+        : (my - oy + (1 - sy) / 2) / dy;
+      return { dist: Math.max(d, 0.01), side, mx, my };
+    }
+  }
+  return { dist: 40, side: 0, mx, my };
+}
+
+// Portal check
+function checkPortals() {
+  for (const p of portalPairs) {
+    let dx = player.x - p.x1, dy = player.y - p.y1;
+    if (dx * dx + dy * dy < 0.8) {
+      player.x = p.x2; player.y = p.y2;
+      return;
+    }
+    dx = player.x - p.x2; dy = player.y - p.y2;
+    if (dx * dx + dy * dy < 0.8) {
+      player.x = p.x1; player.y = p.y1;
+      return;
+    }
+  }
+}
+
+let time = 0;
+
+function render() {
+  requestAnimationFrame(render);
+  time += 0.016;
+
+  // Auto-navigate
+  const speed = 0.018;
+  const turnInfluence = (mouseX - 0.5) * 0.025;
+  player.angle += turnInfluence;
+  player.pitch = (0.5 - mouseY) * 0.35;
+
+  // Avoid walls
+  const fwd = castRay(player.x, player.y, player.angle).dist;
+  if (fwd < 1.2) {
+    const ld = castRay(player.x, player.y, player.angle - 0.7).dist;
+    const rd = castRay(player.x, player.y, player.angle + 0.7).dist;
+    player.angle += ld > rd ? -0.06 : 0.06;
+  }
+
+  const nx = player.x + Math.cos(player.angle) * speed;
+  const ny = player.y + Math.sin(player.angle) * speed;
+  if (get(nx | 0, player.y | 0) === 0) player.x = nx;
+  if (get(player.x | 0, ny | 0) === 0) player.y = ny;
+
+  checkPortals();
+
+  // Background gradient
+  const bg = ctx.createLinearGradient(0, 0, 0, H);
+  bg.addColorStop(0, '#0a0815');
+  bg.addColorStop(0.48, '#150e25');
+  bg.addColorStop(0.52, '#100a1a');
+  bg.addColorStop(1, '#080610');
+  ctx.fillStyle = bg;
+  ctx.fillRect(0, 0, W, H);
+
+  const halfH = H / 2;
+  const pitchOff = player.pitch * H * 0.5;
+  const fov = Math.PI * 0.48;
+  const rays = Math.min(W, 800);
+  const colW = W / rays;
+
+  // Cast rays
+  for (let col = 0; col < rays; col++) {
+    const ra = player.angle - fov / 2 + (col / rays) * fov;
+    const hit = castRay(player.x, player.y, ra);
+    const cd = hit.dist * Math.cos(ra - player.angle);
+    const wh = Math.min(H * 3, H / cd);
+    const top = halfH - wh / 2 + pitchOff;
+
+    // Wall
+    ctx.fillStyle = wallColor(hit.mx, hit.my, hit.side, cd);
+    ctx.fillRect(col * colW, top, colW + 1, wh);
+
+    // Colored light bleed on walls from nearby lights
+    for (const L of lights) {
+      const ldx = hit.mx - L.x, ldy = hit.my - L.y;
+      const ld = Math.sqrt(ldx * ldx + ldy * ldy);
+      if (ld < 10) {
+        const li = L.intensity * (1 - ld / 10) * (0.6 + 0.4 * Math.sin(time * 1.5 + L.phase));
+        const h = L.hue + Math.sin(time * 0.3 + L.phase) * 25;
+        ctx.fillStyle = `hsla(${h}, 85%, 55%, ${li * 0.25})`;
+        ctx.fillRect(col * colW, top, colW + 1, wh);
+      }
+    }
+
+    // Floor with perspective tiles
+    const bot = top + wh;
+    for (let y = bot; y < H; y += 3) {
+      const rowDist = halfH / Math.max(y - halfH - pitchOff, 0.5);
+      const fog = Math.max(0, 1 - rowDist * 0.05);
+      // Checkerboard
+      const fx = player.x + Math.cos(ra) * rowDist;
+      const fy = player.y + Math.sin(ra) * rowDist;
+      const check = ((fx | 0) + (fy | 0)) & 1;
+      const base = check ? 50 : 25;
+      const r = (base * fog + 8) | 0;
+      const g = (base * fog * 0.8 + 6) | 0;
+      const b = ((base + 20) * fog + 15) | 0;
+      ctx.fillStyle = `rgb(${r},${g},${b})`;
+      ctx.fillRect(col * colW, y, colW + 1, 3);
+    }
+
+    // Ceiling
+    for (let y = top; y > 0; y -= 3) {
+      const rowDist = halfH / Math.max(halfH + pitchOff - y, 0.5);
+      const fog = Math.max(0, 1 - rowDist * 0.05);
+      const fx = player.x + Math.cos(ra) * rowDist;
+      const fy = player.y + Math.sin(ra) * rowDist;
+      const check = ((fx | 0) + (fy | 0)) & 1;
+      const base = check ? 40 : 20;
+      const r = (base * fog + 6) | 0;
+      const g = (base * fog * 0.7 + 5) | 0;
+      const b = ((base + 16) * fog + 12) | 0;
+      ctx.fillStyle = `rgb(${r},${g},${b})`;
+      ctx.fillRect(col * colW, y - 3, colW + 1, 3);
+    }
+  }
+
+  // Floor glow strips along corridors
+  for (const L of lights) {
+    const dx = L.x - player.x, dy = L.y - player.y;
+    const dist = Math.sqrt(dx * dx + dy * dy);
+    if (dist > 16) continue;
+    let angle = Math.atan2(dy, dx) - player.angle;
+    while (angle > Math.PI) angle -= Math.PI * 2;
+    while (angle < -Math.PI) angle += Math.PI * 2;
+    if (Math.abs(angle) > fov * 0.55) continue;
+    const sx = W / 2 + (angle / fov) * W;
+    const glowR = (H / dist) * 0.8;
+    const glowY = halfH + pitchOff + (H / dist) * 0.35;
+    const li = L.intensity * (0.5 + 0.5 * Math.sin(time * 1.5 + L.phase));
+    const h = L.hue + Math.sin(time * 0.3 + L.phase) * 20;
+    const grd = ctx.createRadialGradient(sx, glowY, 0, sx, glowY, glowR);
+    grd.addColorStop(0, `hsla(${h}, 80%, 55%, ${li * 0.3})`);
+    grd.addColorStop(1, 'transparent');
+    ctx.fillStyle = grd;
+    ctx.fillRect(sx - glowR, glowY - glowR, glowR * 2, glowR * 2);
+  }
+
+  // Floating glyphs as sprites
+  const visGlyphs = glyphs.map(g => {
+    const dx = g.x - player.x, dy = g.y - player.y;
+    const dist = Math.sqrt(dx * dx + dy * dy);
+    let angle = Math.atan2(dy, dx) - player.angle;
+    while (angle > Math.PI) angle -= Math.PI * 2;
+    while (angle < -Math.PI) angle += Math.PI * 2;
+    return { ...g, dist, angle };
+  }).filter(g => g.dist > 0.5 && g.dist < 22 && Math.abs(g.angle) < fov * 0.6)
+    .sort((a, b) => b.dist - a.dist);
+
+  for (const g of visGlyphs) {
+    const sx = W / 2 + (g.angle / fov) * W;
+    const sh = (H / g.dist) * g.size * 0.025;
+    const bob = Math.sin(time * 1.2 + g.phase) * sh * 0.3;
+    const sy = halfH + pitchOff - sh * g.z + bob;
+    const alpha = Math.max(0, 1 - g.dist * 0.05) * (0.4 + 0.6 * Math.sin(time * 1.8 + g.phase));
+    const hue = g.hue + Math.sin(time * 0.4) * 25;
+
+    ctx.save();
+    ctx.globalAlpha = alpha * 0.9;
+    ctx.fillStyle = `hsl(${hue}, 80%, 65%)`;
+    ctx.shadowColor = `hsl(${hue}, 90%, 55%)`;
+    ctx.shadowBlur = sh * 1.2;
+    ctx.font = `${sh}px serif`;
+    ctx.textAlign = 'center';
+    ctx.fillText(g.char, sx, sy);
+    ctx.restore();
+  }
+
+  // Portal shimmer
+  for (const p of portalPairs) {
+    for (const pt of [{ x: p.x1, y: p.y1 }, { x: p.x2, y: p.y2 }]) {
+      const dx = pt.x - player.x, dy = pt.y - player.y;
+      const dist = Math.sqrt(dx * dx + dy * dy);
+      if (dist > 18) continue;
+      let angle = Math.atan2(dy, dx) - player.angle;
+      while (angle > Math.PI) angle -= Math.PI * 2;
+      while (angle < -Math.PI) angle += Math.PI * 2;
+      if (Math.abs(angle) > fov * 0.55) continue;
+
+      const sx = W / 2 + (angle / fov) * W;
+      const ph = H / dist;
+      const alpha = Math.max(0, 1 - dist * 0.06) * (0.2 + 0.2 * Math.sin(time * 2.5));
+
+      ctx.save();
+      ctx.globalAlpha = alpha;
+      const pgrd = ctx.createLinearGradient(sx - ph * 0.2, 0, sx + ph * 0.2, 0);
+      pgrd.addColorStop(0, 'transparent');
+      pgrd.addColorStop(0.3, `hsla(${p.hue + time * 40 % 360}, 80%, 55%, 0.5)`);
+      pgrd.addColorStop(0.5, `hsla(${(p.hue + 60 + time * 40) % 360}, 90%, 70%, 0.7)`);
+      pgrd.addColorStop(0.7, `hsla(${(p.hue + 120 + time * 40) % 360}, 80%, 55%, 0.5)`);
+      pgrd.addColorStop(1, 'transparent');
+      ctx.fillStyle = pgrd;
+      ctx.fillRect(sx - ph * 0.2, halfH - ph / 2 + pitchOff, ph * 0.4, ph);
+      ctx.restore();
+    }
+  }
+
+  // Vignette
+  const vig = ctx.createRadialGradient(W/2, H/2, H * 0.25, W/2, H/2, H * 0.85);
+  vig.addColorStop(0, 'transparent');
+  vig.addColorStop(1, 'rgba(0,0,0,0.55)');
+  ctx.fillStyle = vig;
+  ctx.fillRect(0, 0, W, H);
+
+  // Subtle scan lines
+  ctx.fillStyle = 'rgba(0,0,0,0.03)';
+  for (let y = 0; y < H; y += 2) ctx.fillRect(0, y, W, 1);
+}
+
+render();
+</script>
+</body>
+</html>

@@ -1,0 +1,245 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=1280,height=720">
+<title>exp-051: Palimpsest</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+  width: 1280px; height: 720px; overflow: hidden;
+  background: #f5f0e8;
+  cursor: crosshair;
+  font-family: 'Georgia', 'Times New Roman', serif;
+}
+canvas { position: absolute; top: 0; left: 0; }
+#info {
+  position: absolute; bottom: 12px; right: 16px;
+  font-size: 11px; color: rgba(139,69,19,0.4); font-family: monospace;
+  pointer-events: none; z-index: 10;
+}
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="info">click and drag to wound the text</div>
+<script>
+const W = 1280, H = 720;
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d');
+canvas.width = W; canvas.height = H;
+
+const lines = [
+  "Everything that can be broken shall be broken,",
+  "and everything broken shall remember its shape.",
+  "The river does not grieve the stone it wears away.",
+  "Each crack is a map of every force that found it.",
+  "We are palimpsests: written, scraped, rewritten,",
+  "yet the ghost of every erased word persists beneath.",
+  "Touch is the first wound. Memory is the scar.",
+  "What heals is never what was broken --",
+  "it is something new wearing the old name.",
+  "The page remembers every hand that turned it.",
+  "Ink fades not into nothing but into the paper itself.",
+  "To read is to damage. To love is to mark.",
+  "There is no surface that has not been a wound.",
+  "The most beautiful things are the most scarred.",
+  "Even light, passing through glass, is changed forever.",
+];
+
+const particles = [];
+const FONT_SIZE = 22;
+const LINE_HEIGHT = 38;
+const MARGIN_X = 100;
+const MARGIN_Y = 75;
+
+ctx.font = `${FONT_SIZE}px Georgia, 'Times New Roman', serif`;
+
+for (let i = 0; i < lines.length; i++) {
+  let xOff = 0;
+  for (let j = 0; j < lines[i].length; j++) {
+    const ch = lines[i][j];
+    const charW = ctx.measureText(ch).width;
+    const homeX = MARGIN_X + xOff;
+    const homeY = MARGIN_Y + i * LINE_HEIGHT;
+    particles.push({
+      ch, homeX, homeY,
+      x: homeX, y: homeY,
+      vx: 0, vy: 0,
+      scarX: homeX, scarY: homeY,
+      wounds: 0,
+      rotation: 0,
+      rotVel: 0,
+    });
+    xOff += charW;
+  }
+}
+
+let mouse = { x: -1000, y: -1000, down: false };
+let totalWounds = 0;
+
+canvas.addEventListener('mousedown', (e) => { mouse.down = true; mouse.x = e.offsetX; mouse.y = e.offsetY; });
+canvas.addEventListener('mouseup', () => { mouse.down = false; });
+canvas.addEventListener('mousemove', (e) => { mouse.x = e.offsetX; mouse.y = e.offsetY; });
+canvas.addEventListener('mouseleave', () => { mouse.down = false; });
+
+const WOUND_RADIUS = 140;
+
+// Pre-wound function: immediately displace particles near a point
+function inflictWound(wx, wy, strength) {
+  for (const p of particles) {
+    const dx = p.x - wx;
+    const dy = p.y - wy;
+    const dist = Math.sqrt(dx * dx + dy * dy);
+    if (dist < WOUND_RADIUS) {
+      const force = strength * (1 - dist / WOUND_RADIUS) * (1 - dist / WOUND_RADIUS);
+      const angle = Math.atan2(dy, dx) + (Math.random() - 0.5) * 0.5;
+      // Directly displace position (not just velocity)
+      p.x += Math.cos(angle) * force * 3;
+      p.y += Math.sin(angle) * force * 3;
+      p.vx += Math.cos(angle) * force * 0.5;
+      p.vy += Math.sin(angle) * force * 0.5;
+      p.rotVel += (Math.random() - 0.5) * 0.3;
+      p.wounds += Math.round(force);
+      p.scarX += (Math.random() - 0.5) * force * 0.15;
+      p.scarY += (Math.random() - 0.5) * force * 0.1;
+      totalWounds += Math.round(force);
+    }
+  }
+}
+
+// Pre-apply wounds for screenshot visibility
+// Wound 1: blast through center lines
+inflictWound(W / 2, H / 2 - 40, 30);
+// Wound 2: upper left area
+inflictWound(320, 180, 20);
+// Wound 3: lower right
+inflictWound(900, 480, 25);
+
+// Let some healing happen (simulate 60 frames of partial healing)
+for (let frame = 0; frame < 60; frame++) {
+  for (const p of particles) {
+    const sx = p.scarX - p.x;
+    const sy = p.scarY - p.y;
+    p.vx += sx * 0.03;
+    p.vy += sy * 0.03;
+    p.rotVel += (-p.rotation) * 0.02;
+    p.vx *= 0.92;
+    p.vy *= 0.92;
+    p.rotVel *= 0.95;
+    p.x += p.vx;
+    p.y += p.vy;
+    p.rotation += p.rotVel;
+  }
+}
+
+// Now add a fresh wound that hasn't healed yet -- for dramatic contrast
+inflictWound(W / 2 + 100, H / 2 + 80, 35);
+
+let frameCount = 0;
+
+function tick() {
+  frameCount++;
+
+  // Background: ages with wounds
+  const age = Math.min(totalWounds * 0.02, 30);
+  ctx.fillStyle = `rgb(${245 - age}, ${240 - age}, ${232 - age * 0.3})`;
+  ctx.fillRect(0, 0, W, H);
+
+  // Draw scar network -- faint connective tissue between wounded chars
+  ctx.save();
+  const scarAlpha = Math.min(totalWounds * 0.0005, 0.12);
+  if (scarAlpha > 0.01) {
+    ctx.globalAlpha = scarAlpha;
+    ctx.strokeStyle = '#8b4513';
+    ctx.lineWidth = 0.4;
+    for (let i = 1; i < particles.length; i++) {
+      const p = particles[i];
+      const pp = particles[i - 1];
+      if (p.wounds > 0 && pp.wounds > 0) {
+        const driftP = Math.abs(p.scarX - p.homeX) + Math.abs(p.scarY - p.homeY);
+        const driftPP = Math.abs(pp.scarX - pp.homeX) + Math.abs(pp.scarY - pp.homeY);
+        if (driftP > 1 || driftPP > 1) {
+          ctx.beginPath();
+          ctx.moveTo(pp.x, pp.y - FONT_SIZE * 0.3);
+          ctx.lineTo(p.x, p.y - FONT_SIZE * 0.3);
+          ctx.stroke();
+        }
+      }
+    }
+  }
+  ctx.restore();
+
+  // Interactive wounds
+  if (mouse.down) {
+    inflictWound(mouse.x, mouse.y, 12);
+  }
+
+  // Update and draw particles
+  for (const p of particles) {
+    // Heal: spring toward scar position
+    if (!mouse.down || Math.sqrt((p.x - mouse.x) ** 2 + (p.y - mouse.y) ** 2) > WOUND_RADIUS) {
+      const sx = p.scarX - p.x;
+      const sy = p.scarY - p.y;
+      p.vx += sx * 0.03;
+      p.vy += sy * 0.03;
+      p.rotVel += (-p.rotation) * 0.02;
+    }
+
+    p.vx *= 0.92;
+    p.vy *= 0.92;
+    p.rotVel *= 0.95;
+    p.x += p.vx;
+    p.y += p.vy;
+    p.rotation += p.rotVel;
+
+    // Visual properties based on wound history
+    const speed = Math.sqrt(p.vx * p.vx + p.vy * p.vy);
+    const woundFade = Math.max(0.25, 1 - p.wounds * 0.003);
+    const flyingFade = Math.max(0.15, 1 - speed * 0.03);
+    const opacity = woundFade * flyingFade;
+
+    // Color shifts: unwounded=black ink, wounded=rust/sienna
+    const scarAmount = Math.min(p.wounds * 0.015, 0.85);
+    const r = Math.round(15 + scarAmount * 125);
+    const g = Math.round(10 + scarAmount * 40);
+    const b = Math.round(8 + scarAmount * 10);
+
+    ctx.save();
+    ctx.translate(p.x, p.y);
+    ctx.rotate(p.rotation);
+    ctx.globalAlpha = opacity;
+    ctx.fillStyle = `rgb(${r},${g},${b})`;
+    ctx.font = `${FONT_SIZE}px Georgia, 'Times New Roman', serif`;
+    ctx.fillText(p.ch, 0, 0);
+    ctx.restore();
+  }
+
+  // Wound halo
+  if (mouse.down) {
+    const gradient = ctx.createRadialGradient(mouse.x, mouse.y, 0, mouse.x, mouse.y, WOUND_RADIUS);
+    gradient.addColorStop(0, 'rgba(139, 69, 19, 0.1)');
+    gradient.addColorStop(0.6, 'rgba(139, 69, 19, 0.03)');
+    gradient.addColorStop(1, 'rgba(139, 69, 19, 0)');
+    ctx.fillStyle = gradient;
+    ctx.beginPath();
+    ctx.arc(mouse.x, mouse.y, WOUND_RADIUS, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  // Wound counter -- appears like margin annotation
+  if (totalWounds > 0) {
+    ctx.save();
+    ctx.font = '10px monospace';
+    ctx.fillStyle = `rgba(139, 69, 19, ${Math.min(0.5, totalWounds * 0.0008)})`;
+    ctx.fillText(`${totalWounds} wounds remembered`, W - 160, 20);
+    ctx.restore();
+  }
+
+  requestAnimationFrame(tick);
+}
+
+tick();
+</script>
+</body>
+</html>

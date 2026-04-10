@@ -1,0 +1,639 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>exp-023 — Emergent Ecosystem</title>
+<style>
+  * { margin: 0; padding: 0; }
+  body { overflow: hidden; background: #000; }
+  canvas { display: block; position: absolute; top: 0; left: 0; }
+  #lenia { z-index: 0; }
+  #agents { z-index: 1; width: 100vw; height: 100vh; }
+  #info {
+    position: fixed; bottom: 12px; left: 12px;
+    color: rgba(255,255,255,0.35); font: 11px/1.4 monospace;
+    pointer-events: none; z-index: 10;
+  }
+</style>
+</head>
+<body>
+<canvas id="lenia"></canvas>
+<canvas id="agents"></canvas>
+<div id="info">click to paint life · boids flock around Lenia creatures</div>
+<script>
+(() => {
+  // === LENIA LAYER (WebGL) ===
+  const lCanvas = document.getElementById('lenia');
+  const gl = lCanvas.getContext('webgl', { preserveDrawingBuffer: true });
+  const SIM_W = 256, SIM_H = 256;
+  lCanvas.width = 1280; lCanvas.height = 720;
+  lCanvas.style.width = '100vw'; lCanvas.style.height = '100vh';
+  gl.viewport(0, 0, lCanvas.width, lCanvas.height);
+
+  const ext = gl.getExtension('OES_texture_float');
+  const useFloat = !!ext;
+
+  // === AGENT LAYER (Canvas 2D) ===
+  const aCanvas = document.getElementById('agents');
+  const ctx = aCanvas.getContext('2d');
+  let AW, AH;
+  function resizeAgents() {
+    AW = aCanvas.width = window.innerWidth;
+    AH = aCanvas.height = window.innerHeight;
+  }
+  resizeAgents();
+  window.addEventListener('resize', resizeAgents);
+
+  // --- Lenia shaders ---
+  const quadVS = `
+  attribute vec2 a_pos;
+  varying vec2 v_uv;
+  void main() {
+    v_uv = a_pos * 0.5 + 0.5;
+    gl_Position = vec4(a_pos, 0.0, 1.0);
+  }`;
+
+  const simFS = `
+  precision highp float;
+  varying vec2 v_uv;
+  uniform sampler2D u_state;
+  uniform vec2 u_simSize;
+  uniform float u_dt;
+  uniform vec2 u_mouse;
+  uniform float u_mouseDown;
+
+  const float R = 13.0;
+  const float mu_k = 0.5;
+  const float sigma_k = 0.15;
+  const float mu_g = 0.15;
+  const float sigma_g = 0.015;
+
+  float bell(float x, float mu, float sigma) {
+    float d = (x - mu) / sigma;
+    return exp(-0.5 * d * d);
+  }
+
+  void main() {
+    vec2 texel = 1.0 / u_simSize;
+    float total = 0.0;
+    float kernelSum = 0.0;
+
+    for (float dy = -13.0; dy <= 13.0; dy += 1.0) {
+      for (float dx = -13.0; dx <= 13.0; dx += 1.0) {
+        float dist = length(vec2(dx, dy)) / R;
+        if (dist > 1.0) continue;
+        float kernelVal = bell(dist, mu_k, sigma_k);
+        vec2 sampleUV = fract(v_uv + vec2(dx, dy) * texel);
+        float state = texture2D(u_state, sampleUV).r;
+        total += state * kernelVal;
+        kernelSum += kernelVal;
+      }
+    }
+
+    float potential = total / kernelSum;
+    float growth = 2.0 * bell(potential, mu_g, sigma_g) - 1.0;
+    float current = texture2D(u_state, v_uv).r;
+    float next = clamp(current + u_dt * growth, 0.0, 1.0);
+
+    if (u_mouseDown > 0.5) {
+      vec2 mUV = u_mouse;
+      float d = length((v_uv - mUV) * u_simSize) / R;
+      if (d < 1.0) {
+        next = max(next, bell(d, 0.0, 0.4));
+      }
+    }
+
+    gl_FragColor = vec4(next, 0.0, 0.0, 1.0);
+  }`;
+
+  // Display shader with creature-tracking color
+  const displayFS = `
+  precision highp float;
+  varying vec2 v_uv;
+  uniform sampler2D u_state;
+  uniform float u_time;
+
+  void main() {
+    float state = texture2D(u_state, v_uv).r;
+    float s = state;
+
+    vec3 c0 = vec3(0.01, 0.005, 0.04);
+    vec3 c1 = vec3(0.08, 0.0, 0.35);
+    vec3 c2 = vec3(0.5, 0.0, 0.3);
+    vec3 c3 = vec3(0.7, 0.3, 0.0);
+    vec3 c4 = vec3(1.0, 0.85, 0.3);
+
+    float t01 = smoothstep(0.0, 0.15, s);
+    float t12 = smoothstep(0.15, 0.35, s);
+    float t23 = smoothstep(0.35, 0.55, s);
+    float t34 = smoothstep(0.55, 0.8, s);
+
+    vec3 color = c0;
+    color = mix(color, c1, t01);
+    color = mix(color, c2, t12);
+    color = mix(color, c3, t23);
+    color = mix(color, c4, t34);
+    color *= 1.1;
+
+    float phase = u_time * 0.1;
+    color = vec3(
+      color.r * (0.9 + 0.1 * sin(phase)),
+      color.g * (0.9 + 0.1 * sin(phase + 2.094)),
+      color.b * (0.9 + 0.1 * sin(phase + 4.189))
+    );
+
+    float sx = texture2D(u_state, v_uv + vec2(0.004, 0.0)).r;
+    float sy = texture2D(u_state, v_uv + vec2(0.0, 0.004)).r;
+    float edge = length(vec2(sx - state, sy - state)) * 5.0;
+    color += vec3(0.0, 0.15, 0.3) * edge;
+
+    color = max(color, vec3(0.01, 0.005, 0.03));
+
+    gl_FragColor = vec4(color, 1.0);
+  }`;
+
+  // --- WebGL setup ---
+  function compileShader(src, type) {
+    const s = gl.createShader(type);
+    gl.shaderSource(s, src);
+    gl.compileShader(s);
+    if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) console.error(gl.getShaderInfoLog(s));
+    return s;
+  }
+  function createProgram(vsSrc, fsSrc) {
+    const vs = compileShader(vsSrc, gl.VERTEX_SHADER);
+    const fs = compileShader(fsSrc, gl.FRAGMENT_SHADER);
+    const prog = gl.createProgram();
+    gl.attachShader(prog, vs); gl.attachShader(prog, fs);
+    gl.linkProgram(prog);
+    return prog;
+  }
+
+  const quadBuf = gl.createBuffer();
+  gl.bindBuffer(gl.ARRAY_BUFFER, quadBuf);
+  gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1,-1,1,-1,-1,1,-1,1,1,-1,1,1]), gl.STATIC_DRAW);
+
+  const simProg = createProgram(quadVS, simFS);
+  const displayProg = createProgram(quadVS, displayFS);
+
+  const simU = {
+    state: gl.getUniformLocation(simProg, 'u_state'),
+    simSize: gl.getUniformLocation(simProg, 'u_simSize'),
+    dt: gl.getUniformLocation(simProg, 'u_dt'),
+    mouse: gl.getUniformLocation(simProg, 'u_mouse'),
+    mouseDown: gl.getUniformLocation(simProg, 'u_mouseDown'),
+  };
+  const dispU = {
+    state: gl.getUniformLocation(displayProg, 'u_state'),
+    time: gl.getUniformLocation(displayProg, 'u_time'),
+  };
+
+  function createStateTex() {
+    const tex = gl.createTexture();
+    gl.bindTexture(gl.TEXTURE_2D, tex);
+    if (useFloat) gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, SIM_W, SIM_H, 0, gl.RGBA, gl.FLOAT, null);
+    else gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, SIM_W, SIM_H, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.REPEAT);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.REPEAT);
+    return tex;
+  }
+  function createFBO(tex) {
+    const fbo = gl.createFramebuffer();
+    gl.bindFramebuffer(gl.FRAMEBUFFER, fbo);
+    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, tex, 0);
+    return fbo;
+  }
+
+  const texA = createStateTex(), texB = createStateTex();
+  const fboA = createFBO(texA), fboB = createFBO(texB);
+
+  function seedState() {
+    const data = new Float32Array(SIM_W * SIM_H * 4);
+    function addSeed(cx, cy, radius) {
+      for (let y = 0; y < SIM_H; y++) {
+        for (let x = 0; x < SIM_W; x++) {
+          const dx = x - cx, dy = y - cy;
+          const dist = Math.sqrt(dx*dx+dy*dy) / radius;
+          if (dist < 1.0) {
+            const val = Math.exp(-0.5 * Math.pow((dist - 0.5) / 0.15, 2)) + Math.random() * 0.1 * (1 - dist);
+            const idx = (y * SIM_W + x) * 4;
+            data[idx] = Math.max(data[idx], Math.min(1, val));
+          }
+        }
+      }
+    }
+    addSeed(SIM_W*0.25, SIM_H*0.3, 18);
+    addSeed(SIM_W*0.7, SIM_H*0.6, 15);
+    addSeed(SIM_W*0.5, SIM_H*0.5, 20);
+    addSeed(SIM_W*0.15, SIM_H*0.7, 12);
+    addSeed(SIM_W*0.8, SIM_H*0.25, 16);
+    for (let i = 0; i < 8; i++) addSeed(Math.random()*SIM_W, Math.random()*SIM_H, 8+Math.random()*10);
+
+    gl.bindTexture(gl.TEXTURE_2D, texA);
+    if (useFloat) gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, SIM_W, SIM_H, 0, gl.RGBA, gl.FLOAT, data);
+    else {
+      const bd = new Uint8Array(data.length);
+      for (let i = 0; i < data.length; i++) bd[i] = Math.floor(Math.min(1,Math.max(0,data[i]))*255);
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, SIM_W, SIM_H, 0, gl.RGBA, gl.UNSIGNED_BYTE, bd);
+    }
+  }
+  seedState();
+
+  let mouseX = 0.5, mouseY = 0.5, mouseDown = 0;
+  let mousePx = AW/2, mousePy = AH/2;
+
+  aCanvas.addEventListener('mousemove', e => {
+    mouseX = e.clientX / AW;
+    mouseY = 1.0 - e.clientY / AH;
+    mousePx = e.clientX; mousePy = e.clientY;
+  });
+  aCanvas.addEventListener('mousedown', () => { mouseDown = 1; });
+  aCanvas.addEventListener('mouseup', () => { mouseDown = 0; });
+  aCanvas.addEventListener('dblclick', () => { seedState(); });
+
+  let readTex = texA, writeTex = texB, readFBO = fboA, writeFBO = fboB;
+
+  function drawQuad(prog) {
+    const aPos = gl.getAttribLocation(prog, 'a_pos');
+    gl.bindBuffer(gl.ARRAY_BUFFER, quadBuf);
+    gl.enableVertexAttribArray(aPos);
+    gl.vertexAttribPointer(aPos, 2, gl.FLOAT, false, 0, 0);
+    gl.drawArrays(gl.TRIANGLES, 0, 6);
+  }
+
+  // === BOID AGENTS ===
+  // These agents flock using classic boids rules, but are attracted to
+  // Lenia creature density — they orbit the living structures like
+  // symbiotic organisms around a reef.
+
+  const BOID_COUNT = 300;
+  const PRED_COUNT = 4;
+  const MAX_SPEED = 3.0;
+  const PRED_SPEED = 3.8;
+  const PERCEPTION = 50;
+
+  // Read Lenia density from a downsampled pixel buffer
+  const sampleW = 64, sampleH = 36;
+  const sampleBuf = new Uint8Array(sampleW * sampleH * 4);
+  let leniaField = new Float32Array(sampleW * sampleH);
+
+  function sampleLenia() {
+    // Read back a downsampled version of the Lenia state for CPU agents
+    gl.bindFramebuffer(gl.FRAMEBUFFER, readFBO);
+    gl.readPixels(0, 0, SIM_W, SIM_H, gl.RGBA, gl.UNSIGNED_BYTE, new Uint8Array(SIM_W * SIM_H * 4));
+    // Actually, read from the display framebuffer at lower res
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    // We'll use a simpler approach: read pixels from the rendered display
+  }
+
+  // Approximate lenia density by reading rendered pixels
+  let pixelData = null;
+  function readLeniaField() {
+    // Read from the WebGL canvas after display render
+    const pixels = new Uint8Array(lCanvas.width * lCanvas.height * 4);
+    gl.readPixels(0, 0, lCanvas.width, lCanvas.height, gl.RGBA, gl.UNSIGNED_BYTE, pixels);
+    pixelData = pixels;
+  }
+
+  function getLeniaDensity(screenX, screenY) {
+    if (!pixelData) return 0;
+    const px = Math.floor(screenX / AW * lCanvas.width);
+    const py = Math.floor((1 - screenY / AH) * lCanvas.height); // flip Y
+    if (px < 0 || px >= lCanvas.width || py < 0 || py >= lCanvas.height) return 0;
+    const idx = (py * lCanvas.width + px) * 4;
+    // Use brightness as density proxy
+    return (pixelData[idx] + pixelData[idx+1] + pixelData[idx+2]) / (255 * 3);
+  }
+
+  function getLeniaGradient(screenX, screenY) {
+    const d = 8;
+    const dx = getLeniaDensity(screenX + d, screenY) - getLeniaDensity(screenX - d, screenY);
+    const dy = getLeniaDensity(screenX, screenY + d) - getLeniaDensity(screenX, screenY - d);
+    return [dx, dy];
+  }
+
+  function dist2(a, b) { return (a.x-b.x)**2 + (a.y-b.y)**2; }
+  function limit(vx, vy, max) {
+    const m = Math.sqrt(vx*vx+vy*vy);
+    if (m > max) { const s = max/m; return [vx*s, vy*s]; }
+    return [vx, vy];
+  }
+  function wrap(v) {
+    if (v.x < 0) v.x += AW;
+    if (v.x > AW) v.x -= AW;
+    if (v.y < 0) v.y += AH;
+    if (v.y > AH) v.y -= AH;
+  }
+
+  // Spatial hash
+  const CELL_SIZE = 60;
+  let grid = {};
+  function gridKey(x, y) { return ((x/CELL_SIZE)|0)+','+((y/CELL_SIZE)|0); }
+  function gridInsert(e) { const k = gridKey(e.x,e.y); if(!grid[k])grid[k]=[]; grid[k].push(e); }
+  function gridQuery(x, y, r) {
+    const results = [];
+    const cr = Math.ceil(r/CELL_SIZE);
+    const cx = (x/CELL_SIZE)|0, cy = (y/CELL_SIZE)|0;
+    for(let dx=-cr;dx<=cr;dx++) for(let dy=-cr;dy<=cr;dy++) {
+      const k=(cx+dx)+','+(cy+dy);
+      if(grid[k]) for(const e of grid[k]) results.push(e);
+    }
+    return results;
+  }
+
+  class Boid {
+    constructor() {
+      this.x = Math.random() * AW;
+      this.y = Math.random() * AH;
+      const a = Math.random() * Math.PI * 2;
+      this.vx = Math.cos(a) * 2; this.vy = Math.sin(a) * 2;
+      this.hue = 160 + Math.random() * 40; // cyan-teal
+      this.type = 'boid';
+      this.fleeing = 0;
+      this.nearLife = 0;
+    }
+    update(predators) {
+      let sepX=0,sepY=0,sepN=0, aliX=0,aliY=0,aliN=0, cohX=0,cohY=0,cohN=0;
+      let fleeX=0,fleeY=0,fleeN=0;
+
+      const nearby = gridQuery(this.x, this.y, PERCEPTION);
+      for (const other of nearby) {
+        if (other === this || other.type !== 'boid') continue;
+        const d2 = dist2(this, other);
+        if (d2 > PERCEPTION*PERCEPTION || d2 === 0) continue;
+        const d = Math.sqrt(d2);
+        if (d < 20) { sepX += (this.x-other.x)/d; sepY += (this.y-other.y)/d; sepN++; }
+        aliX += other.vx; aliY += other.vy; aliN++;
+        cohX += other.x; cohY += other.y; cohN++;
+      }
+
+      for (const pred of predators) {
+        const d2 = dist2(this, pred);
+        if (d2 < 120*120 && d2 > 0) {
+          const d = Math.sqrt(d2);
+          fleeX += (this.x-pred.x)/d * (120/d);
+          fleeY += (this.y-pred.y)/d * (120/d);
+          fleeN++;
+        }
+      }
+
+      let ax=0, ay=0;
+      if (sepN>0) { ax += sepX/sepN*2.5; ay += sepY/sepN*2.5; }
+      if (aliN>0) { ax += (aliX/aliN-this.vx)*1.0; ay += (aliY/aliN-this.vy)*1.0; }
+      if (cohN>0) { ax += (cohX/cohN-this.x)*0.01; ay += (cohY/cohN-this.y)*0.01; }
+      if (fleeN>0) { ax += fleeX/fleeN*6.0; ay += fleeY/fleeN*6.0; }
+
+      // Lenia attraction: climb the density gradient (symbiotic orbiting)
+      const [gx, gy] = getLeniaGradient(this.x, this.y);
+      const density = getLeniaDensity(this.x, this.y);
+      this.nearLife = density;
+
+      // Attract toward Lenia life, but orbit rather than converge
+      const attraction = 3.0;
+      ax += gx * attraction * 80;
+      ay += gy * attraction * 80;
+      // Tangential force for orbiting
+      if (density > 0.05) {
+        ax += -gy * 40 * density;
+        ay += gx * 40 * density;
+      }
+
+      // Mouse avoidance
+      const mdx = this.x - mousePx, mdy = this.y - mousePy;
+      const md2 = mdx*mdx + mdy*mdy;
+      if (md2 < 100*100 && md2 > 0) {
+        const md = Math.sqrt(md2);
+        ax += mdx/md*4; ay += mdy/md*4;
+      }
+
+      this.fleeing = fleeN > 0 ? Math.min(1, this.fleeing + 0.15) : Math.max(0, this.fleeing - 0.02);
+
+      this.vx += ax; this.vy += ay;
+      const spd = this.fleeing > 0.5 ? MAX_SPEED * 1.5 : MAX_SPEED;
+      [this.vx, this.vy] = limit(this.vx, this.vy, spd);
+      this.x += this.vx; this.y += this.vy;
+      wrap(this);
+
+      // Hue shifts: near life = warmer, fleeing = redder
+      if (this.nearLife > 0.1) this.hue += 0.5;
+      else this.hue -= 0.3;
+      if (this.hue > 260) this.hue = 160;
+      if (this.hue < 140) this.hue = 260;
+    }
+    draw() {
+      const angle = Math.atan2(this.vy, this.vx);
+      const speed = Math.sqrt(this.vx*this.vx + this.vy*this.vy);
+      const sz = 3.5 + speed * 0.6 + this.nearLife * 3;
+
+      ctx.save();
+      ctx.translate(this.x, this.y);
+      ctx.rotate(angle);
+
+      const lightness = 55 + this.fleeing * 20 + this.nearLife * 15;
+      const sat = 70 + this.nearLife * 30;
+      const h = this.fleeing > 0.3 ? this.hue + (360-this.hue)*this.fleeing*0.4 : this.hue;
+
+      ctx.fillStyle = `hsl(${h|0},${sat|0}%,${lightness|0}%)`;
+      ctx.globalAlpha = 0.85;
+      ctx.beginPath();
+      ctx.moveTo(sz, 0);
+      ctx.lineTo(-sz*0.6, -sz*0.4);
+      ctx.lineTo(-sz*0.3, 0);
+      ctx.lineTo(-sz*0.6, sz*0.4);
+      ctx.closePath();
+      ctx.fill();
+
+      // Glow near life
+      if (this.nearLife > 0.1 || this.fleeing > 0.2) {
+        ctx.globalAlpha = Math.max(this.nearLife, this.fleeing) * 0.35;
+        ctx.shadowColor = `hsl(${h|0},100%,70%)`;
+        ctx.shadowBlur = 8 + this.nearLife * 10;
+        ctx.fill();
+        ctx.shadowBlur = 0;
+      }
+
+      ctx.restore();
+    }
+  }
+
+  class Predator {
+    constructor() {
+      this.x = Math.random() * AW; this.y = Math.random() * AH;
+      const a = Math.random() * Math.PI * 2;
+      this.vx = Math.cos(a)*2; this.vy = Math.sin(a)*2;
+      this.type = 'predator';
+      this.energy = 1;
+      this.trail = [];
+    }
+    update(boids) {
+      let targetX=0,targetY=0,targetN=0,minD=Infinity,closest=null;
+      for (const b of boids) {
+        const d2 = dist2(this, b);
+        if (d2 < 200*200) { targetX+=b.x; targetY+=b.y; targetN++; }
+        if (d2 < minD) { minD=d2; closest=b; }
+      }
+
+      let ax=0, ay=0;
+      if (targetN > 0) {
+        ax += (targetX/targetN - this.x)*0.004;
+        ay += (targetY/targetN - this.y)*0.004;
+      }
+      if (closest) {
+        const d = Math.sqrt(minD);
+        if (d > 0) { ax += (closest.x-this.x)/d*1.5; ay += (closest.y-this.y)/d*1.5; }
+      }
+
+      // Predators avoid Lenia life (it's "terrain")
+      const [gx, gy] = getLeniaGradient(this.x, this.y);
+      const density = getLeniaDensity(this.x, this.y);
+      if (density > 0.15) {
+        ax -= gx * 60; ay -= gy * 60;
+      }
+
+      // Separate from other predators
+      for (const other of predators) {
+        if (other === this) continue;
+        const d2 = dist2(this, other);
+        if (d2 < 180*180 && d2 > 0) {
+          const d = Math.sqrt(d2);
+          ax += (this.x-other.x)/d*3; ay += (this.y-other.y)/d*3;
+        }
+      }
+
+      this.vx += ax; this.vy += ay;
+      [this.vx, this.vy] = limit(this.vx, this.vy, PRED_SPEED);
+      this.x += this.vx; this.y += this.vy;
+      wrap(this);
+      this.trail.push({x:this.x,y:this.y});
+      if (this.trail.length > 25) this.trail.shift();
+      this.energy = Math.max(0.3, this.energy - 0.001);
+
+      if (closest && minD < 15*15) {
+        closest.vx += (closest.x-this.x)*0.5;
+        closest.vy += (closest.y-this.y)*0.5;
+        closest.fleeing = 1;
+        closest.hue = 0;
+        this.energy = Math.min(1, this.energy + 0.2);
+      }
+    }
+    draw() {
+      if (this.trail.length > 1) {
+        ctx.beginPath();
+        ctx.moveTo(this.trail[0].x, this.trail[0].y);
+        for (let i = 1; i < this.trail.length; i++) {
+          if (Math.abs(this.trail[i].x-this.trail[i-1].x) > AW/2) ctx.moveTo(this.trail[i].x, this.trail[i].y);
+          else ctx.lineTo(this.trail[i].x, this.trail[i].y);
+        }
+        ctx.strokeStyle = `rgba(255,60,30,${0.12*this.energy})`;
+        ctx.lineWidth = 2; ctx.stroke();
+      }
+      const angle = Math.atan2(this.vy, this.vx);
+      const sz = 9 + this.energy * 4;
+      ctx.save();
+      ctx.translate(this.x, this.y);
+      ctx.rotate(angle);
+      ctx.fillStyle = `hsl(10,90%,${45+this.energy*20|0}%)`;
+      ctx.globalAlpha = 0.95;
+      ctx.shadowColor = 'rgba(255,50,20,0.5)';
+      ctx.shadowBlur = 12 + this.energy * 8;
+      ctx.beginPath();
+      ctx.moveTo(sz, 0);
+      ctx.lineTo(-sz*0.5, -sz*0.5);
+      ctx.lineTo(-sz*0.2, 0);
+      ctx.lineTo(-sz*0.5, sz*0.5);
+      ctx.closePath();
+      ctx.fill();
+      ctx.shadowBlur = 0;
+      ctx.restore();
+    }
+  }
+
+  const boids = [];
+  const predators = [];
+  for (let i = 0; i < BOID_COUNT; i++) boids.push(new Boid());
+  for (let i = 0; i < PRED_COUNT; i++) predators.push(new Predator());
+
+  aCanvas.addEventListener('click', e => { predators.push(new Predator()); predators[predators.length-1].x = e.clientX; predators[predators.length-1].y = e.clientY; });
+
+  // === MAIN LOOP ===
+  let frameCount = 0;
+
+  function frame(t) {
+    const time = t * 0.001;
+
+    // --- Lenia simulation ---
+    for (let step = 0; step < 3; step++) {
+      gl.bindFramebuffer(gl.FRAMEBUFFER, writeFBO);
+      gl.viewport(0, 0, SIM_W, SIM_H);
+      gl.useProgram(simProg);
+      gl.activeTexture(gl.TEXTURE0);
+      gl.bindTexture(gl.TEXTURE_2D, readTex);
+      gl.uniform1i(simU.state, 0);
+      gl.uniform2f(simU.simSize, SIM_W, SIM_H);
+      gl.uniform1f(simU.dt, 0.1);
+      gl.uniform2f(simU.mouse, mouseX, mouseY);
+      gl.uniform1f(simU.mouseDown, step===0 ? mouseDown : 0);
+      drawQuad(simProg);
+      [readTex, writeTex] = [writeTex, readTex];
+      [readFBO, writeFBO] = [writeFBO, readFBO];
+    }
+
+    // --- Lenia display ---
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    gl.viewport(0, 0, lCanvas.width, lCanvas.height);
+    gl.useProgram(displayProg);
+    gl.activeTexture(gl.TEXTURE0);
+    gl.bindTexture(gl.TEXTURE_2D, readTex);
+    gl.uniform1i(dispU.state, 0);
+    gl.uniform1f(dispU.time, time);
+    drawQuad(displayProg);
+
+    // --- Read Lenia field for agents (every 3 frames for perf) ---
+    if (frameCount % 3 === 0) {
+      readLeniaField();
+    }
+
+    // --- Agent layer ---
+    ctx.clearRect(0, 0, AW, AH);
+
+    // Rebuild spatial grid
+    grid = {};
+    for (const b of boids) gridInsert(b);
+
+    // Update
+    for (const b of boids) b.update(predators);
+    for (const p of predators) p.update(boids);
+
+    // Draw connection lines between close boids
+    if (frameCount % 2 === 0) {
+      ctx.globalAlpha = 0.04;
+      ctx.strokeStyle = '#88eeff';
+      ctx.lineWidth = 0.5;
+      for (const a of boids) {
+        const nearby = gridQuery(a.x, a.y, 25);
+        for (const b of nearby) {
+          if (b === a || b.type !== 'boid') continue;
+          if (dist2(a,b) < 25*25) {
+            if (Math.abs(a.x-b.x)>AW/2) continue;
+            ctx.beginPath(); ctx.moveTo(a.x,a.y); ctx.lineTo(b.x,b.y); ctx.stroke();
+          }
+        }
+      }
+      ctx.globalAlpha = 1;
+    }
+
+    for (const b of boids) b.draw();
+    for (const p of predators) p.draw();
+
+    frameCount++;
+    requestAnimationFrame(frame);
+  }
+
+  requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>

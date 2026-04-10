@@ -1,0 +1,478 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>exp-022 — Typographic Decay</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    width: 1280px; height: 720px; overflow: hidden;
+    background: #08060f;
+    font-family: 'Courier New', monospace;
+    cursor: crosshair;
+  }
+  .cell {
+    position: absolute;
+    border: none;
+    outline: none;
+    font-family: 'Courier New', monospace;
+    pointer-events: none;
+    -webkit-appearance: none;
+    appearance: none;
+  }
+  #glow {
+    position: fixed; top: 0; left: 0;
+    width: 100%; height: 100%;
+    pointer-events: none; z-index: 999;
+    mix-blend-mode: screen;
+    background: radial-gradient(circle 300px at var(--mx, 640px) var(--my, 360px),
+      rgba(200, 100, 255, 0.15), transparent);
+  }
+</style>
+</head>
+<body>
+<div id="glow"></div>
+<script>
+(function() {
+  const W = 1280, H = 720;
+  const COLS = 44, ROWS = 20;
+  const CELL_W = W / COLS, CELL_H = H / ROWS;
+  const TOTAL = COLS * ROWS;
+
+  let mx = W / 2, my = H / 2;
+  let pmx = mx, pmy = my;
+  let time = 0;
+
+  // Fluid grid (Jos Stam simplified)
+  const FGRID = 48;
+  const fcols = FGRID + 2, frows = FGRID + 2;
+  const fsize = fcols * frows;
+  let vx = new Float32Array(fsize);
+  let vy = new Float32Array(fsize);
+  let vx0 = new Float32Array(fsize);
+  let vy0 = new Float32Array(fsize);
+
+  function FIX(i, j) { return i + j * fcols; }
+
+  function setBnd(b, x) {
+    for (let i = 1; i <= FGRID; i++) {
+      x[FIX(0, i)]         = b === 1 ? -x[FIX(1, i)] : x[FIX(1, i)];
+      x[FIX(FGRID+1, i)]   = b === 1 ? -x[FIX(FGRID, i)] : x[FIX(FGRID, i)];
+      x[FIX(i, 0)]         = b === 2 ? -x[FIX(i, 1)] : x[FIX(i, 1)];
+      x[FIX(i, FGRID+1)]   = b === 2 ? -x[FIX(i, FGRID)] : x[FIX(i, FGRID)];
+    }
+    x[FIX(0, 0)]               = 0.5 * (x[FIX(1, 0)] + x[FIX(0, 1)]);
+    x[FIX(0, FGRID+1)]         = 0.5 * (x[FIX(1, FGRID+1)] + x[FIX(0, FGRID)]);
+    x[FIX(FGRID+1, 0)]         = 0.5 * (x[FIX(FGRID, 0)] + x[FIX(FGRID+1, 1)]);
+    x[FIX(FGRID+1, FGRID+1)]   = 0.5 * (x[FIX(FGRID, FGRID+1)] + x[FIX(FGRID+1, FGRID)]);
+  }
+
+  function diffuse(b, x, x0, diff, dt) {
+    const a = dt * diff * FGRID * FGRID;
+    for (let k = 0; k < 4; k++) {
+      for (let j = 1; j <= FGRID; j++) {
+        for (let i = 1; i <= FGRID; i++) {
+          x[FIX(i,j)] = (x0[FIX(i,j)] + a * (x[FIX(i-1,j)] + x[FIX(i+1,j)] +
+            x[FIX(i,j-1)] + x[FIX(i,j+1)])) / (1 + 4 * a);
+        }
+      }
+      setBnd(b, x);
+    }
+  }
+
+  function advect(b, d, d0, u, v, dt) {
+    const dt0 = dt * FGRID;
+    for (let j = 1; j <= FGRID; j++) {
+      for (let i = 1; i <= FGRID; i++) {
+        let x = i - dt0 * u[FIX(i,j)];
+        let y = j - dt0 * v[FIX(i,j)];
+        if (x < 0.5) x = 0.5;
+        if (x > FGRID + 0.5) x = FGRID + 0.5;
+        if (y < 0.5) y = 0.5;
+        if (y > FGRID + 0.5) y = FGRID + 0.5;
+        const i0 = x | 0, j0 = y | 0;
+        const i1 = i0 + 1, j1 = j0 + 1;
+        const s1 = x - i0, s0 = 1 - s1;
+        const t1 = y - j0, t0 = 1 - t1;
+        d[FIX(i,j)] = s0 * (t0 * d0[FIX(i0,j0)] + t1 * d0[FIX(i0,j1)]) +
+                       s1 * (t0 * d0[FIX(i1,j0)] + t1 * d0[FIX(i1,j1)]);
+      }
+    }
+    setBnd(b, d);
+  }
+
+  function project(u, v, p, div) {
+    const h = 1.0 / FGRID;
+    for (let j = 1; j <= FGRID; j++) {
+      for (let i = 1; i <= FGRID; i++) {
+        div[FIX(i,j)] = -0.5 * h * (u[FIX(i+1,j)] - u[FIX(i-1,j)] +
+          v[FIX(i,j+1)] - v[FIX(i,j-1)]);
+        p[FIX(i,j)] = 0;
+      }
+    }
+    setBnd(0, div); setBnd(0, p);
+    for (let k = 0; k < 4; k++) {
+      for (let j = 1; j <= FGRID; j++) {
+        for (let i = 1; i <= FGRID; i++) {
+          p[FIX(i,j)] = (div[FIX(i,j)] + p[FIX(i-1,j)] + p[FIX(i+1,j)] +
+            p[FIX(i,j-1)] + p[FIX(i,j+1)]) / 4;
+        }
+      }
+      setBnd(0, p);
+    }
+    for (let j = 1; j <= FGRID; j++) {
+      for (let i = 1; i <= FGRID; i++) {
+        u[FIX(i,j)] -= 0.5 * (p[FIX(i+1,j)] - p[FIX(i-1,j)]) * FGRID;
+        v[FIX(i,j)] -= 0.5 * (p[FIX(i,j+1)] - p[FIX(i,j-1)]) * FGRID;
+      }
+    }
+    setBnd(1, u); setBnd(2, v);
+  }
+
+  function fluidStep(dt) {
+    diffuse(1, vx0, vx, 0.0001, dt);
+    diffuse(2, vy0, vy, 0.0001, dt);
+    project(vx0, vy0, vx, vy);
+    advect(1, vx, vx0, vx0, vy0, dt);
+    advect(2, vy, vy0, vx0, vy0, dt);
+    project(vx, vy, vx0, vy0);
+  }
+
+  function getFluidVel(px, py) {
+    const fi = (px / W) * FGRID + 1;
+    const fj = (py / H) * FGRID + 1;
+    const i0 = Math.max(1, Math.min(FGRID, fi | 0));
+    const j0 = Math.max(1, Math.min(FGRID, fj | 0));
+    const i1 = Math.min(FGRID, i0 + 1);
+    const j1 = Math.min(FGRID, j0 + 1);
+    const s = fi - i0, t = fj - j0;
+    const u = (1-s)*(1-t)*vx[FIX(i0,j0)] + s*(1-t)*vx[FIX(i1,j0)] +
+              (1-s)*t*vx[FIX(i0,j1)] + s*t*vx[FIX(i1,j1)];
+    const v = (1-s)*(1-t)*vy[FIX(i0,j0)] + s*(1-t)*vy[FIX(i1,j0)] +
+              (1-s)*t*vy[FIX(i0,j1)] + s*t*vy[FIX(i1,j1)];
+    return [u * 80, v * 80];
+  }
+
+  // Element types from DOM Decay parent
+  const elTypes = ['button', 'input', 'div', 'span', 'select', 'textarea', 'label', 'progress', 'meter'];
+  const inputTypes = ['text', 'range', 'checkbox', 'radio', 'color'];
+
+  // Typography from Liquid Typography parent
+  const ALPHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789@#$%&?!'.split('');
+  const UNICODE = '\u03B1\u03B2\u03B3\u03B4\u03B5\u03B6\u03B7\u03B8\u03BB\u03BC\u03C0\u03C3\u03C6\u03C8\u03C9\u2200\u2202\u2203\u2205\u2207\u2208\u221A\u221E\u222B\u2248\u2260\u2264\u2265'.split('');
+  const ALL_GLYPHS = ALPHABET.concat(UNICODE);
+
+  // The phrase that periodically coalesces
+  const PHRASE = 'EVERYTHING DECAYS';
+  let phraseTargets = [];
+  let formPhase = 0; // 0 = flowing, 1 = forming text, 2 = holding, 3 = dissolving
+  let phaseTimer = 0;
+  const PHASE_DURS = [8, 3, 2, 3]; // seconds per phase
+
+  function computePhraseTargets() {
+    phraseTargets = [];
+    const charW = 28, charH = 36;
+    const totalW = PHRASE.length * charW;
+    const startX = (W - totalW) / 2;
+    const startY = H / 2 - charH / 2;
+    for (let i = 0; i < PHRASE.length; i++) {
+      if (PHRASE[i] === ' ') continue;
+      phraseTargets.push({
+        char: PHRASE[i],
+        x: startX + i * charW + charW / 2,
+        y: startY + charH / 2
+      });
+    }
+  }
+  computePhraseTargets();
+
+  const cells = [];
+  const frag = document.createDocumentFragment();
+
+  for (let i = 0; i < TOTAL; i++) {
+    const col = i % COLS;
+    const row = Math.floor(i / COLS);
+    const typeIdx = (col * 7 + row * 13 + i * 3) % elTypes.length;
+    const tag = elTypes[typeIdx];
+
+    const el = document.createElement(tag);
+    el.className = 'cell';
+
+    if (tag === 'input') {
+      el.type = inputTypes[(col + row) % inputTypes.length];
+      if (el.type === 'range') el.value = Math.random() * 100;
+      if (el.type === 'color') el.value = '#' + Math.floor(Math.random()*16777215).toString(16).padStart(6,'0');
+    }
+    if (tag === 'button' || tag === 'span' || tag === 'label' || tag === 'div') {
+      el.textContent = ALL_GLYPHS[i % ALL_GLYPHS.length];
+    }
+    if (tag === 'progress') { el.max = 100; el.value = (i * 7) % 100; }
+    if (tag === 'meter') { el.min = 0; el.max = 100; el.value = (i * 11) % 100; }
+    if (tag === 'select') {
+      const opt = document.createElement('option');
+      opt.textContent = ALL_GLYPHS[(i + 4) % ALL_GLYPHS.length];
+      el.appendChild(opt);
+    }
+    if (tag === 'textarea') {
+      el.value = ALL_GLYPHS[i % ALL_GLYPHS.length];
+      el.readOnly = true;
+    }
+
+    const homeX = col * CELL_W;
+    const homeY = row * CELL_H;
+
+    cells.push({
+      el, homeX, homeY,
+      x: homeX, y: homeY,
+      vx: 0, vy: 0,
+      angle: 0, scale: 1,
+      hue: 0, sat: 90, light: 55,
+      opacity: 0,
+      col, row, idx: i, tag,
+      w: CELL_W - 1, h: CELL_H - 1,
+      freq: 0.5 + Math.random() * 2,
+      phaseOff: Math.random() * Math.PI * 2,
+      // Assigned phrase target (if any)
+      phraseIdx: -1,
+      forming: false,
+    });
+
+    frag.appendChild(el);
+  }
+  document.body.appendChild(frag);
+
+  // Assign some cells to phrase targets
+  function assignPhraseCells() {
+    // Reset
+    for (const c of cells) { c.phraseIdx = -1; c.forming = false; }
+    // Pick cells closest to each target
+    for (let t = 0; t < phraseTargets.length; t++) {
+      const tgt = phraseTargets[t];
+      let bestDist = Infinity, bestIdx = -1;
+      for (let i = 0; i < cells.length; i++) {
+        if (cells[i].phraseIdx >= 0) continue;
+        const dx = cells[i].x - tgt.x;
+        const dy = cells[i].y - tgt.y;
+        const d = dx * dx + dy * dy;
+        if (d < bestDist) { bestDist = d; bestIdx = i; }
+      }
+      if (bestIdx >= 0) {
+        cells[bestIdx].phraseIdx = t;
+        // Change the element's text to the phrase character
+        const c = cells[bestIdx];
+        if (c.tag === 'button' || c.tag === 'span' || c.tag === 'label' || c.tag === 'div') {
+          c.el.textContent = tgt.char;
+        }
+      }
+    }
+  }
+
+  document.addEventListener('mousemove', (e) => {
+    pmx = mx; pmy = my;
+    mx = e.clientX; my = e.clientY;
+    document.body.style.setProperty('--mx', mx + 'px');
+    document.body.style.setProperty('--my', my + 'px');
+  });
+
+  let started = false;
+
+  function animate() {
+    const dt = 1 / 60;
+    time += dt;
+    phaseTimer += dt;
+
+    // Phase management
+    if (phaseTimer >= PHASE_DURS[formPhase]) {
+      phaseTimer = 0;
+      formPhase = (formPhase + 1) % 4;
+      if (formPhase === 1) assignPhraseCells();
+    }
+
+    // Inject mouse velocity into fluid
+    const fmi = Math.max(1, Math.min(FGRID, ((mx / W) * FGRID + 1) | 0));
+    const fmj = Math.max(1, Math.min(FGRID, ((my / H) * FGRID + 1) | 0));
+    const mdx = mx - pmx, mdy = my - pmy;
+    vx[FIX(fmi, fmj)] += mdx * 0.15;
+    vy[FIX(fmi, fmj)] += mdy * 0.15;
+
+    // Add turbulent sources
+    for (let k = 0; k < 3; k++) {
+      const si = 1 + Math.floor(Math.random() * FGRID);
+      const sj = 1 + Math.floor(Math.random() * FGRID);
+      vx[FIX(si, sj)] += (Math.sin(time * 2.3 + si * 0.5) * 0.4);
+      vy[FIX(si, sj)] += (Math.cos(time * 1.7 + sj * 0.5) * 0.4);
+    }
+
+    fluidStep(dt);
+
+    // Quick fade-in
+    if (!started && time > 0.05) {
+      started = true;
+      for (const c of cells) c.opacity = 1;
+    }
+
+    const formT = Math.min(phaseTimer / PHASE_DURS[formPhase], 1);
+    const easeT = formT < 0.5 ? 2*formT*formT : 1 - Math.pow(-2*formT+2, 2)/2;
+
+    for (let i = 0; i < TOTAL; i++) {
+      const c = cells[i];
+      const [fu, fv] = getFluidVel(c.x, c.y);
+      const dx = mx - c.x, dy = my - c.y;
+      const dist = Math.sqrt(dx * dx + dy * dy);
+      const mf = Math.max(0, 1 - dist / 200);
+
+      const baseHue = (c.col / COLS * 280 + c.row / ROWS * 80 + time * 20) % 360;
+
+      if (formPhase === 0) {
+        // Flowing: fluid drives the elements
+        c.vx += fu * 0.15 + (Math.random() - 0.5) * 0.3;
+        c.vy += fv * 0.15 + (Math.random() - 0.5) * 0.3;
+        // Gentle home pull
+        c.vx += (c.homeX - c.x) * 0.002;
+        c.vy += (c.homeY - c.y) * 0.002;
+        // Mouse influence
+        if (mf > 0) {
+          c.vx += dx * 0.003 * mf;
+          c.vy += dy * 0.003 * mf;
+        }
+        c.vx *= 0.95;
+        c.vy *= 0.95;
+        c.x += c.vx;
+        c.y += c.vy;
+        c.angle = Math.atan2(c.vy, c.vx) * 15;
+        c.scale = 0.7 + Math.abs(fu + fv) * 0.08 + mf * 0.5;
+        c.hue = baseHue + fu * 30;
+        c.sat = 85 + mf * 15;
+        c.light = 45 + Math.abs(fu) * 8 + mf * 20;
+        c.w = CELL_W - 1;
+        c.h = CELL_H - 1;
+        c.forming = false;
+      }
+      else if (formPhase === 1) {
+        // Forming: phrase cells pull toward targets, others keep flowing
+        if (c.phraseIdx >= 0) {
+          const tgt = phraseTargets[c.phraseIdx];
+          c.vx += (tgt.x - c.x) * 0.08 * easeT;
+          c.vy += (tgt.y - c.y) * 0.08 * easeT;
+          c.vx *= 0.85;
+          c.vy *= 0.85;
+          c.x += c.vx;
+          c.y += c.vy;
+          c.scale = 1.2 + easeT * 1.0;
+          c.angle *= 0.9;
+          c.hue = 50 + easeT * 10; // warm golden
+          c.sat = 90;
+          c.light = 60 + easeT * 20;
+          c.forming = true;
+        } else {
+          // Non-phrase cells drift outward
+          c.vx += fu * 0.1;
+          c.vy += fv * 0.1;
+          c.vx += (c.x - W/2) * 0.0005 * easeT;
+          c.vy += (c.y - H/2) * 0.0005 * easeT;
+          c.vx *= 0.96;
+          c.vy *= 0.96;
+          c.x += c.vx;
+          c.y += c.vy;
+          c.angle = Math.atan2(c.vy, c.vx) * 10;
+          c.scale = 0.5 + (1 - easeT) * 0.3;
+          c.hue = baseHue;
+          c.sat = 70;
+          c.light = 35 + mf * 15;
+        }
+        c.w = CELL_W - 1;
+        c.h = CELL_H - 1;
+      }
+      else if (formPhase === 2) {
+        // Holding: phrase cells glow at target, others orbit gently
+        if (c.phraseIdx >= 0) {
+          const tgt = phraseTargets[c.phraseIdx];
+          c.x += (tgt.x - c.x) * 0.15;
+          c.y += (tgt.y - c.y) * 0.15;
+          c.vx *= 0.8; c.vy *= 0.8;
+          c.scale = 2.0 + Math.sin(time * 3 + c.phraseIdx * 0.5) * 0.2;
+          c.angle = Math.sin(time * 2 + c.phraseIdx) * 3;
+          c.hue = 45 + Math.sin(time * 4 + c.phraseIdx * 0.3) * 15;
+          c.sat = 95;
+          c.light = 75 + Math.sin(time * 5) * 10;
+        } else {
+          c.vx += fu * 0.05;
+          c.vy += fv * 0.05;
+          c.vx *= 0.97;
+          c.vy *= 0.97;
+          c.x += c.vx;
+          c.y += c.vy;
+          c.scale = 0.4;
+          c.hue = baseHue;
+          c.light = 30;
+        }
+        c.w = CELL_W - 1;
+        c.h = CELL_H - 1;
+      }
+      else if (formPhase === 3) {
+        // Dissolving: all cells get blasted by turbulence
+        c.vx += fu * 0.3 + (Math.random() - 0.5) * 2;
+        c.vy += fv * 0.3 + (Math.random() - 0.5) * 2 + easeT * 0.5;
+        if (mf > 0) {
+          c.vx -= dx * 0.01 * mf;
+          c.vy -= dy * 0.01 * mf;
+        }
+        c.vx *= 0.94;
+        c.vy *= 0.94;
+        c.x += c.vx;
+        c.y += c.vy;
+        c.angle += (fu - fv) * 2;
+        c.scale = 0.6 + easeT * 0.4 * Math.abs(Math.sin(time * c.freq));
+        c.w = (CELL_W - 1) * (0.5 + Math.abs(fu) * 0.3);
+        c.h = (CELL_H - 1) * (0.5 + Math.abs(fv) * 0.3);
+        c.hue = (baseHue + easeT * 180) % 360;
+        c.sat = 90;
+        c.light = 45 + easeT * 15;
+        c.forming = false;
+        // Restore original glyph
+        if (c.phraseIdx >= 0 && easeT > 0.5) {
+          if (c.tag === 'button' || c.tag === 'span' || c.tag === 'label' || c.tag === 'div') {
+            c.el.textContent = ALL_GLYPHS[c.idx % ALL_GLYPHS.length];
+          }
+          c.phraseIdx = -1;
+        }
+      }
+
+      // Wrap
+      if (c.x < -60) c.x += W + 120;
+      if (c.x > W + 60) c.x -= W + 120;
+      if (c.y < -60) c.y += H + 120;
+      if (c.y > H + 60) c.y -= H + 120;
+
+      // Render
+      const bRadius = c.forming ? (6 + Math.sin(time * 4) * 3) :
+                       (c.tag === 'button' || c.tag === 'span') ? (3 + mf * 8) : (2 + mf * 4);
+      const glow = c.forming ? (12 + Math.sin(time * 3) * 6) : (3 + mf * 12);
+      const borderAlpha = c.forming ? 0.8 : (0.2 + mf * 0.5);
+
+      c.el.style.cssText =
+        `position:absolute;` +
+        `left:${c.x|0}px;top:${c.y|0}px;` +
+        `width:${Math.max(3, c.w)|0}px;height:${Math.max(3, c.h)|0}px;` +
+        `transform:rotate(${c.angle.toFixed(1)}deg) scale(${c.scale.toFixed(3)});` +
+        `background:hsl(${c.hue|0},${c.sat|0}%,${c.light|0}%);` +
+        `color:hsl(${((c.hue + 180) % 360)|0},90%,${c.forming ? 95 : 85}%);` +
+        `opacity:${c.opacity};` +
+        `border:1px solid hsla(${((c.hue + 50) % 360)|0},100%,75%,${borderAlpha.toFixed(2)});` +
+        `border-radius:${bRadius|0}px;` +
+        `box-shadow:0 0 ${glow|0}px hsla(${c.hue|0},100%,65%,${(c.forming ? 0.6 : 0.15 + mf * 0.35).toFixed(2)});` +
+        `font-size:${c.forming ? 18 : (9 + mf * 4)|0}px;` +
+        `font-weight:${c.forming ? 'bold' : 'normal'};` +
+        `text-align:center;line-height:${Math.max(3, c.h)|0}px;` +
+        `overflow:hidden;pointer-events:none;-webkit-appearance:none;appearance:none;`;
+    }
+
+    requestAnimationFrame(animate);
+  }
+
+  requestAnimationFrame(animate);
+})();
+</script>
+</body>
+</html>

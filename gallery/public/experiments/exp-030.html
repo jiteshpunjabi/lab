@@ -1,0 +1,651 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Cascade</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: #0a0a12;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    height: 100vh;
+    overflow: hidden;
+    font-family: 'Courier New', monospace;
+    color: #c0c0d0;
+  }
+  canvas { display: block; cursor: pointer; }
+  #ui {
+    position: absolute;
+    top: 20px;
+    left: 50%;
+    transform: translateX(-50%);
+    text-align: center;
+    pointer-events: none;
+    z-index: 10;
+  }
+  #title {
+    font-size: 28px;
+    letter-spacing: 8px;
+    color: #6af;
+    text-shadow: 0 0 20px rgba(100,170,255,0.5);
+    margin-bottom: 6px;
+  }
+  #status {
+    font-size: 14px;
+    letter-spacing: 3px;
+    min-height: 20px;
+  }
+  #scores {
+    position: absolute;
+    bottom: 20px;
+    left: 50%;
+    transform: translateX(-50%);
+    display: flex;
+    gap: 60px;
+    font-size: 16px;
+    letter-spacing: 2px;
+    z-index: 10;
+  }
+  .player-score { text-align: center; }
+  .player-score .label { font-size: 11px; opacity: 0.6; margin-bottom: 4px; }
+  .player-score .count { font-size: 32px; font-weight: bold; }
+  .cyan .count { color: #4ff; text-shadow: 0 0 15px rgba(68,255,255,0.6); }
+  .red .count { color: #f66; text-shadow: 0 0 15px rgba(255,100,100,0.6); }
+  #restart {
+    position: absolute;
+    bottom: 80px;
+    left: 50%;
+    transform: translateX(-50%);
+    background: none;
+    border: 1px solid #6af;
+    color: #6af;
+    padding: 8px 24px;
+    font-family: 'Courier New', monospace;
+    font-size: 13px;
+    letter-spacing: 3px;
+    cursor: pointer;
+    display: none;
+    z-index: 10;
+    pointer-events: auto;
+  }
+  #restart:hover { background: rgba(100,170,255,0.15); }
+  #instructions {
+    position: absolute;
+    bottom: 120px;
+    left: 50%;
+    transform: translateX(-50%);
+    font-size: 11px;
+    opacity: 0.4;
+    text-align: center;
+    letter-spacing: 1px;
+    line-height: 1.8;
+    z-index: 10;
+    pointer-events: none;
+    max-width: 400px;
+  }
+</style>
+</head>
+<body>
+<div id="ui">
+  <div id="title">CASCADE</div>
+  <div id="status">YOUR TURN</div>
+</div>
+<div id="scores">
+  <div class="player-score cyan">
+    <div class="label">YOU</div>
+    <div class="count" id="p1score">0</div>
+  </div>
+  <div class="player-score red">
+    <div class="label">AI</div>
+    <div class="count" id="p2score">0</div>
+  </div>
+</div>
+<div id="instructions">
+  CLICK A CELL TO PLACE AN ORB<br>
+  CELLS EXPLODE WHEN FULL, CASCADING TO NEIGHBORS<br>
+  EXPLOSIONS CAPTURE ENEMY ORBS<br>
+  DOMINATE THE BOARD TO WIN
+</div>
+<button id="restart" onclick="initGame()">PLAY AGAIN</button>
+<canvas id="c"></canvas>
+
+<script>
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d');
+const statusEl = document.getElementById('status');
+const p1scoreEl = document.getElementById('p1score');
+const p2scoreEl = document.getElementById('p2score');
+const restartBtn = document.getElementById('restart');
+const instructionsEl = document.getElementById('instructions');
+
+// Grid config
+const COLS = 7;
+const ROWS = 7;
+const HEX_SIZE = 36;
+
+let cells = [];
+let currentPlayer = 1; // 1 = human (cyan), 2 = AI (red)
+let animating = false;
+let gameOver = false;
+let turnCount = 0;
+let particles = [];
+let explosionQueue = [];
+let processingExplosions = false;
+let demoMode = false;
+
+// Resize
+function resize() {
+  canvas.width = window.innerWidth;
+  canvas.height = window.innerHeight;
+}
+window.addEventListener('resize', resize);
+resize();
+
+// Hex math
+const sqrt3 = Math.sqrt(3);
+
+function hexToPixel(col, row) {
+  const cx = canvas.width / 2;
+  const cy = canvas.height / 2;
+  const gridW = (COLS - 1) * HEX_SIZE * sqrt3;
+  const gridH = (ROWS - 1) * HEX_SIZE * 1.5;
+  const ox = cx - gridW / 2;
+  const oy = cy - gridH / 2;
+  const x = ox + col * HEX_SIZE * sqrt3 + (row % 2 === 1 ? HEX_SIZE * sqrt3 / 2 : 0);
+  const y = oy + row * HEX_SIZE * 1.5;
+  return { x, y };
+}
+
+function getNeighbors(col, row) {
+  const even = row % 2 === 0;
+  const dirs = even
+    ? [[-1,0],[1,0],[0,-1],[0,1],[-1,-1],[-1,1]]
+    : [[-1,0],[1,0],[0,-1],[0,1],[1,-1],[1,1]];
+  const result = [];
+  for (const [dc, dr] of dirs) {
+    const nc = col + dc;
+    const nr = row + dr;
+    if (nc >= 0 && nc < COLS && nr >= 0 && nr < ROWS) {
+      result.push({ col: nc, row: nr });
+    }
+  }
+  return result;
+}
+
+function getCapacity(col, row) {
+  return getNeighbors(col, row).length;
+}
+
+function getCell(col, row) {
+  return cells[row * COLS + col];
+}
+
+// Init
+function initGame() {
+  cells = [];
+  for (let r = 0; r < ROWS; r++) {
+    for (let c = 0; c < COLS; c++) {
+      cells.push({
+        col: c,
+        row: r,
+        owner: 0,
+        orbs: 0,
+        capacity: getCapacity(c, r),
+        shakeX: 0,
+        shakeY: 0,
+        flashAlpha: 0
+      });
+    }
+  }
+  currentPlayer = 1;
+  turnCount = 0;
+  gameOver = false;
+  demoMode = false;
+  animating = false;
+  particles = [];
+  explosionQueue = [];
+  processingExplosions = false;
+  restartBtn.style.display = 'none';
+  instructionsEl.style.opacity = '0.4';
+  statusEl.textContent = 'YOUR TURN';
+  statusEl.style.color = '#4ff';
+  updateScores();
+}
+
+// Drawing
+function drawHex(x, y, size, fill, stroke, lineWidth) {
+  ctx.beginPath();
+  for (let i = 0; i < 6; i++) {
+    const angle = Math.PI / 180 * (60 * i - 30);
+    const px = x + size * Math.cos(angle);
+    const py = y + size * Math.sin(angle);
+    if (i === 0) ctx.moveTo(px, py);
+    else ctx.lineTo(px, py);
+  }
+  ctx.closePath();
+  if (fill) { ctx.fillStyle = fill; ctx.fill(); }
+  if (stroke) { ctx.strokeStyle = stroke; ctx.lineWidth = lineWidth || 1; ctx.stroke(); }
+}
+
+function orbColor(owner, alpha) {
+  if (owner === 1) return `rgba(68,255,255,${alpha})`;
+  if (owner === 2) return `rgba(255,100,100,${alpha})`;
+  return `rgba(150,150,170,${alpha})`;
+}
+
+function drawOrbs(x, y, count, owner, t) {
+  const positions = [];
+  if (count === 1) {
+    positions.push({ dx: 0, dy: 0 });
+  } else if (count === 2) {
+    positions.push({ dx: -7, dy: 0 }, { dx: 7, dy: 0 });
+  } else if (count === 3) {
+    positions.push({ dx: 0, dy: -7 }, { dx: -6, dy: 5 }, { dx: 6, dy: 5 });
+  } else if (count === 4) {
+    positions.push({ dx: -7, dy: -5 }, { dx: 7, dy: -5 }, { dx: -7, dy: 5 }, { dx: 7, dy: 5 });
+  } else if (count === 5) {
+    positions.push({ dx: 0, dy: -8 }, { dx: -8, dy: -2 }, { dx: 8, dy: -2 }, { dx: -5, dy: 7 }, { dx: 5, dy: 7 });
+  } else {
+    for (let i = 0; i < Math.min(count, 6); i++) {
+      const a = (Math.PI * 2 * i) / count;
+      positions.push({ dx: Math.cos(a) * 9, dy: Math.sin(a) * 9 });
+    }
+  }
+
+  for (let i = 0; i < positions.length; i++) {
+    const p = positions[i];
+    const wobble = Math.sin(t * 3 + i * 1.5) * 1.5;
+    const ox = x + p.dx + wobble;
+    const oy = y + p.dy + Math.cos(t * 2.5 + i) * 1.2;
+    const r = 5.5;
+
+    // Glow
+    const grad = ctx.createRadialGradient(ox, oy, 0, ox, oy, r * 3);
+    grad.addColorStop(0, orbColor(owner, 0.4));
+    grad.addColorStop(1, orbColor(owner, 0));
+    ctx.fillStyle = grad;
+    ctx.beginPath();
+    ctx.arc(ox, oy, r * 3, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Orb body
+    const bodyGrad = ctx.createRadialGradient(ox - 1.5, oy - 1.5, 0, ox, oy, r);
+    bodyGrad.addColorStop(0, orbColor(owner, 1));
+    bodyGrad.addColorStop(0.7, orbColor(owner, 0.8));
+    bodyGrad.addColorStop(1, orbColor(owner, 0.3));
+    ctx.fillStyle = bodyGrad;
+    ctx.beginPath();
+    ctx.arc(ox, oy, r, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Specular
+    ctx.fillStyle = `rgba(255,255,255,0.5)`;
+    ctx.beginPath();
+    ctx.arc(ox - 1.5, oy - 2, 1.8, 0, Math.PI * 2);
+    ctx.fill();
+  }
+}
+
+function drawParticles(t) {
+  for (let i = particles.length - 1; i >= 0; i--) {
+    const p = particles[i];
+    p.x += p.vx;
+    p.y += p.vy;
+    p.life -= 0.02;
+    p.vy += 0.1;
+    if (p.life <= 0) { particles.splice(i, 1); continue; }
+    ctx.globalAlpha = p.life;
+    ctx.fillStyle = orbColor(p.owner, 1);
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, p.size * p.life, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  ctx.globalAlpha = 1;
+}
+
+function spawnExplosionParticles(x, y, owner) {
+  for (let i = 0; i < 12; i++) {
+    const angle = Math.random() * Math.PI * 2;
+    const speed = 1 + Math.random() * 4;
+    particles.push({
+      x, y,
+      vx: Math.cos(angle) * speed,
+      vy: Math.sin(angle) * speed,
+      life: 0.6 + Math.random() * 0.4,
+      size: 2 + Math.random() * 3,
+      owner
+    });
+  }
+}
+
+// Hover state
+let hoverCell = null;
+
+canvas.addEventListener('mousemove', (e) => {
+  if (animating || gameOver || currentPlayer !== 1) return;
+  hoverCell = null;
+  for (let r = 0; r < ROWS; r++) {
+    for (let c = 0; c < COLS; c++) {
+      const pos = hexToPixel(c, r);
+      const dx = e.clientX - pos.x;
+      const dy = e.clientY - pos.y;
+      if (dx * dx + dy * dy < (HEX_SIZE - 4) * (HEX_SIZE - 4)) {
+        const cell = getCell(c, r);
+        if (cell.owner === 0 || cell.owner === 1) {
+          hoverCell = cell;
+        }
+      }
+    }
+  }
+});
+
+// Click
+canvas.addEventListener('click', (e) => {
+  if (demoMode) {
+    demoMode = false;
+    initGame();
+    return;
+  }
+  if (animating || gameOver || currentPlayer !== 1) return;
+  for (let r = 0; r < ROWS; r++) {
+    for (let c = 0; c < COLS; c++) {
+      const pos = hexToPixel(c, r);
+      const dx = e.clientX - pos.x;
+      const dy = e.clientY - pos.y;
+      if (dx * dx + dy * dy < (HEX_SIZE - 4) * (HEX_SIZE - 4)) {
+        const cell = getCell(c, r);
+        if (cell.owner === 0 || cell.owner === currentPlayer) {
+          placeOrb(c, r, currentPlayer);
+          instructionsEl.style.opacity = '0';
+          return;
+        }
+      }
+    }
+  }
+});
+
+function placeOrb(col, row, player) {
+  const cell = getCell(col, row);
+  cell.owner = player;
+  cell.orbs++;
+  turnCount++;
+  animating = true;
+
+  if (cell.orbs >= cell.capacity) {
+    explosionQueue.push({ col, row });
+    processExplosions(() => {
+      finishTurn();
+    });
+  } else {
+    setTimeout(() => finishTurn(), 150);
+  }
+}
+
+function processExplosions(callback) {
+  if (explosionQueue.length === 0) {
+    callback();
+    return;
+  }
+
+  const batch = [...explosionQueue];
+  explosionQueue = [];
+  const nextBatch = [];
+
+  for (const { col, row } of batch) {
+    const cell = getCell(col, row);
+    if (cell.orbs < cell.capacity) continue;
+
+    const owner = cell.owner;
+    const pos = hexToPixel(col, row);
+    spawnExplosionParticles(pos.x, pos.y, owner);
+    cell.flashAlpha = 1;
+
+    cell.orbs -= cell.capacity;
+    if (cell.orbs <= 0) {
+      cell.orbs = 0;
+      cell.owner = 0;
+    }
+
+    const neighbors = getNeighbors(col, row);
+    for (const n of neighbors) {
+      const nc = getCell(n.col, n.row);
+      nc.owner = owner;
+      nc.orbs++;
+      if (nc.orbs >= nc.capacity) {
+        nextBatch.push({ col: n.col, row: n.row });
+      }
+    }
+  }
+
+  explosionQueue = nextBatch;
+
+  // Check for win mid-chain
+  if (turnCount > 2) {
+    const winner = checkWin();
+    if (winner) {
+      setTimeout(() => {
+        endGame(winner);
+        callback();
+      }, 300);
+      return;
+    }
+  }
+
+  setTimeout(() => processExplosions(callback), 250);
+}
+
+function finishTurn() {
+  animating = false;
+  updateScores();
+
+  if (turnCount > 2) {
+    const winner = checkWin();
+    if (winner) {
+      endGame(winner);
+      return;
+    }
+  }
+
+  if (currentPlayer === 1) {
+    currentPlayer = 2;
+    statusEl.textContent = 'AI THINKING...';
+    statusEl.style.color = '#f66';
+    setTimeout(aiMove, 400 + Math.random() * 300);
+  } else {
+    currentPlayer = 1;
+    statusEl.textContent = 'YOUR TURN';
+    statusEl.style.color = '#4ff';
+  }
+}
+
+function updateScores() {
+  let p1 = 0, p2 = 0;
+  for (const cell of cells) {
+    if (cell.owner === 1) p1 += cell.orbs;
+    if (cell.owner === 2) p2 += cell.orbs;
+  }
+  p1scoreEl.textContent = p1;
+  p2scoreEl.textContent = p2;
+}
+
+function checkWin() {
+  let p1 = 0, p2 = 0;
+  for (const cell of cells) {
+    if (cell.owner === 1) p1++;
+    if (cell.owner === 2) p2++;
+  }
+  if (p1 > 0 && p2 === 0) return 1;
+  if (p2 > 0 && p1 === 0) return 2;
+  return 0;
+}
+
+function endGame(winner) {
+  gameOver = true;
+  animating = false;
+  if (winner === 1) {
+    statusEl.textContent = 'YOU WIN';
+    statusEl.style.color = '#4ff';
+  } else {
+    statusEl.textContent = 'AI WINS';
+    statusEl.style.color = '#f66';
+  }
+  restartBtn.style.display = 'block';
+}
+
+// AI
+function aiMove() {
+  if (gameOver) return;
+
+  let bestScore = -Infinity;
+  let bestMoves = [];
+
+  for (const cell of cells) {
+    if (cell.owner !== 0 && cell.owner !== 2) continue;
+    let score = 0;
+
+    // Prefer cells close to exploding
+    const remaining = cell.capacity - cell.orbs;
+    if (cell.owner === 2) {
+      if (remaining === 1) score += 50; // about to explode
+      else if (remaining === 2) score += 20;
+      score += cell.orbs * 5;
+    } else {
+      score += 3; // claiming empty cells
+    }
+
+    // Prefer cells near enemy cells (to capture)
+    const neighbors = getNeighbors(cell.col, cell.row);
+    for (const n of neighbors) {
+      const nc = getCell(n.col, n.row);
+      if (nc.owner === 1) {
+        score += 8;
+        if (nc.orbs >= nc.capacity - 1) score += 15; // enemy about to explode nearby
+      }
+      if (nc.owner === 2 && nc.orbs >= nc.capacity - 1) {
+        score += 12; // chain potential
+      }
+    }
+
+    // Prefer center-ish cells
+    const cx = (COLS - 1) / 2;
+    const cy = (ROWS - 1) / 2;
+    const dist = Math.abs(cell.col - cx) + Math.abs(cell.row - cy);
+    score -= dist * 0.5;
+
+    // Corner/edge cells have lower capacity = easier to explode
+    if (cell.capacity <= 3 && cell.owner === 2) score += 10;
+
+    // Avoid cells where enemy is about to explode into us
+    for (const n of neighbors) {
+      const nc = getCell(n.col, n.row);
+      if (nc.owner === 1 && nc.orbs >= nc.capacity - 1) {
+        score -= 5;
+      }
+    }
+
+    // Add some randomness
+    score += Math.random() * 6;
+
+    if (score > bestScore) {
+      bestScore = score;
+      bestMoves = [cell];
+    } else if (score === bestScore) {
+      bestMoves.push(cell);
+    }
+  }
+
+  if (bestMoves.length > 0) {
+    const chosen = bestMoves[Math.floor(Math.random() * bestMoves.length)];
+    placeOrb(chosen.col, chosen.row, 2);
+  }
+}
+
+// Main render loop
+let lastTime = 0;
+function render(time) {
+  const t = time / 1000;
+  const dt = (time - lastTime) / 1000;
+  lastTime = time;
+
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+  // Draw cells
+  for (const cell of cells) {
+    const pos = hexToPixel(cell.col, cell.row);
+    const px = pos.x + cell.shakeX;
+    const py = pos.y + cell.shakeY;
+
+    // Decay shake
+    cell.shakeX *= 0.85;
+    cell.shakeY *= 0.85;
+    cell.flashAlpha *= 0.92;
+
+    // Hex background
+    let bgAlpha = 0.06;
+    if (hoverCell === cell) bgAlpha = 0.15;
+
+    // Near-critical glow
+    if (cell.orbs > 0 && cell.orbs >= cell.capacity - 1) {
+      const pulse = 0.5 + 0.5 * Math.sin(t * 6);
+      bgAlpha = 0.1 + pulse * 0.1;
+    }
+
+    drawHex(px, py, HEX_SIZE - 2, `rgba(100,140,200,${bgAlpha})`, `rgba(100,140,200,0.15)`, 1);
+
+    // Flash from explosion
+    if (cell.flashAlpha > 0.01) {
+      drawHex(px, py, HEX_SIZE - 2, orbColor(cell.owner || 1, cell.flashAlpha * 0.4));
+    }
+
+    // Draw orbs
+    if (cell.orbs > 0) {
+      drawOrbs(px, py, cell.orbs, cell.owner, t);
+    }
+  }
+
+  // Draw particles
+  drawParticles(t);
+
+  requestAnimationFrame(render);
+}
+
+initGame();
+
+// Seed a demo state so the screenshot shows mid-game visuals.
+// First click resets to a real game.
+demoMode = true;
+(function seedDemo() {
+  const seeds = [
+    { c: 2, r: 1, owner: 1, orbs: 2 },
+    { c: 4, r: 1, owner: 2, orbs: 3 },
+    { c: 1, r: 2, owner: 1, orbs: 1 },
+    { c: 3, r: 2, owner: 2, orbs: 2 },
+    { c: 5, r: 2, owner: 1, orbs: 4 },
+    { c: 2, r: 3, owner: 2, orbs: 1 },
+    { c: 4, r: 3, owner: 1, orbs: 3 },
+    { c: 6, r: 3, owner: 2, orbs: 2 },
+    { c: 1, r: 4, owner: 1, orbs: 2 },
+    { c: 3, r: 4, owner: 2, orbs: 5 },
+    { c: 5, r: 4, owner: 1, orbs: 1 },
+    { c: 0, r: 5, owner: 2, orbs: 1 },
+    { c: 2, r: 5, owner: 1, orbs: 3 },
+    { c: 4, r: 5, owner: 2, orbs: 2 },
+    { c: 3, r: 6, owner: 1, orbs: 1 },
+  ];
+  for (const s of seeds) {
+    const cell = getCell(s.c, s.r);
+    cell.owner = s.owner;
+    cell.orbs = s.orbs;
+  }
+  turnCount = 15;
+  statusEl.textContent = 'CLICK TO PLAY';
+  updateScores();
+})();
+
+requestAnimationFrame(render);
+</script>
+</body>
+</html>

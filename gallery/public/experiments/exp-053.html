@@ -1,0 +1,474 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=1280,height=720">
+<title>exp-053 -- Pandemic Cascade</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0a0a12;display:flex;justify-content:center;align-items:center;width:1280px;height:720px;overflow:hidden;font-family:'Courier New',monospace;color:#c0c0d0}
+canvas{display:block;cursor:pointer}
+#ui{position:absolute;top:16px;left:50%;transform:translateX(-50%);text-align:center;pointer-events:none;z-index:10}
+#title{font-size:22px;letter-spacing:6px;color:#e8a040;text-shadow:0 0 20px rgba(232,160,64,0.4);margin-bottom:4px}
+#status{font-size:12px;letter-spacing:3px;min-height:18px}
+#stats{position:absolute;top:16px;right:20px;font-size:11px;letter-spacing:1px;line-height:1.8;z-index:10;pointer-events:none;text-align:right}
+.stat-healthy{color:#4f8}
+.stat-infected{color:#f84}
+.stat-dead{color:#f44}
+.stat-mutated{color:#c6f}
+#instructions{position:absolute;bottom:16px;left:50%;transform:translateX(-50%);font-size:10px;opacity:0.35;text-align:center;letter-spacing:1px;line-height:1.8;z-index:10;pointer-events:none}
+</style>
+</head>
+<body>
+<div id="ui">
+  <div id="title">PANDEMIC CASCADE</div>
+  <div id="status">CLICK A NOTE TO INFECT</div>
+</div>
+<div id="stats">
+  <div class="stat-healthy">HEALTHY: <span id="sH">0</span></div>
+  <div class="stat-infected">INFECTED: <span id="sI">0</span></div>
+  <div class="stat-dead">DEAD: <span id="sD">0</span></div>
+  <div class="stat-mutated">MUTATED: <span id="sM">0</span></div>
+</div>
+<div id="instructions">CLICK A NOTE TO START INFECTION<br>WATCH PLAGUE CASCADE THROUGH THE HEXAGONAL SCORE</div>
+<canvas id="c" width="1280" height="720"></canvas>
+<script>
+// PANDEMIC CASCADE
+// Offspring of exp-030 (Cascade) and exp-050 (Plague Symphony)
+// A hex grid of musical notes where infection cascades like chain reactions.
+// When a cell's infection is full, it explodes and infects all neighbors --
+// the chain-reaction mechanic from Cascade meets the contagion from Plague Symphony.
+// Notes mutate pitch, tremble, and die, with audio feedback.
+
+const C = document.getElementById('c');
+const ctx = C.getContext('2d');
+const W = 1280, H = 720;
+const statusEl = document.getElementById('status');
+
+let audioCtx = null;
+function ensureAudio() {
+  if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  return audioCtx;
+}
+
+// Hex grid config -- larger than Cascade, arranged as a musical score
+const COLS = 16;
+const ROWS = 8;
+const HEX_SIZE = 28;
+const sqrt3 = Math.sqrt(3);
+
+// Musical scale -- pentatonic + chromatic neighbors for mutation
+const SCALE = [261.63,293.66,329.63,392.00,440.00,523.25,587.33,659.25,783.99,880.00,1046.50];
+
+const notes = [];
+let noteId = 0;
+const particles = [];
+
+function hexToPixel(col, row) {
+  const gridW = (COLS - 1) * HEX_SIZE * sqrt3;
+  const gridH = (ROWS - 1) * HEX_SIZE * 1.5;
+  const ox = (W - gridW) / 2;
+  const oy = (H - gridH) / 2 + 10;
+  const x = ox + col * HEX_SIZE * sqrt3 + (row % 2 === 1 ? HEX_SIZE * sqrt3 / 2 : 0);
+  const y = oy + row * HEX_SIZE * 1.5;
+  return { x, y };
+}
+
+function getNeighbors(col, row) {
+  const even = row % 2 === 0;
+  const dirs = even
+    ? [[-1,0],[1,0],[0,-1],[0,1],[-1,-1],[-1,1]]
+    : [[-1,0],[1,0],[0,-1],[0,1],[1,-1],[1,1]];
+  const result = [];
+  for (const [dc, dr] of dirs) {
+    const nc = col + dc, nr = row + dr;
+    if (nc >= 0 && nc < COLS && nr >= 0 && nr < ROWS) {
+      result.push(nr * COLS + nc);
+    }
+  }
+  return result;
+}
+
+// Build note grid
+for (let r = 0; r < ROWS; r++) {
+  for (let c = 0; c < COLS; c++) {
+    const pos = hexToPixel(c, r);
+    const pitchIdx = Math.floor(Math.sin(c * 0.8 + r * 1.5) * 4.5 + 5);
+    notes.push({
+      id: noteId++,
+      col: c, row: r,
+      x: pos.x, y: pos.y,
+      pitchIdx: pitchIdx,
+      originalPitchIdx: pitchIdx,
+      neighbors: getNeighbors(c, r),
+      capacity: getNeighbors(c, r).length,
+      // Infection state (0-1, explodes at 1)
+      infection: 0,
+      infected: false,
+      infectionTime: 0,
+      mutated: false,
+      mutationOffset: 0,
+      dead: false,
+      deathTime: 0,
+      // Visual
+      tremor: 0,
+      tremorPhase: Math.random() * Math.PI * 2,
+      flashAlpha: 0,
+      stemDir: pitchIdx > 5 ? -1 : 1,
+    });
+  }
+}
+
+let startTime = null;
+let explosionQueue = [];
+let frame = 0;
+
+function playNote(freq, type, vol, dur) {
+  try {
+    const ac = ensureAudio();
+    const osc = ac.createOscillator();
+    const gain = ac.createGain();
+    osc.frequency.value = freq;
+    osc.type = type;
+    gain.gain.value = vol;
+    gain.gain.exponentialRampToValueAtTime(0.001, ac.currentTime + dur);
+    osc.connect(gain); gain.connect(ac.destination);
+    osc.start(ac.currentTime); osc.stop(ac.currentTime + dur);
+  } catch(e) {}
+}
+
+function infectNote(note, amount) {
+  if (note.dead) return;
+  if (!note.infected) {
+    note.infected = true;
+    note.infectionTime = performance.now();
+    playNote(SCALE[note.pitchIdx] || 440, 'sine', 0.05, 0.4);
+  }
+  note.infection = Math.min(1, note.infection + amount);
+  note.tremor = note.infection * 3;
+}
+
+function explodeNote(note) {
+  if (note.dead) return;
+  // Cascade! Infect all neighbors
+  const pos = { x: note.x, y: note.y };
+  spawnExplosion(pos.x, pos.y, note.infection > 0.8 ? '#f44' : '#f84');
+  note.flashAlpha = 1;
+
+  // Mutate on explosion
+  if (!note.mutated && Math.random() < 0.6) {
+    note.mutated = true;
+    note.mutationOffset = (Math.random() - 0.5) * 4;
+    note.pitchIdx = Math.max(0, Math.min(10, Math.round(note.originalPitchIdx + note.mutationOffset)));
+    playNote((SCALE[note.pitchIdx] || 440) * (1 + (Math.random()-0.5)*0.15), 'sawtooth', 0.03, 0.3);
+  }
+
+  // Spread infection to neighbors -- the cascade mechanic
+  for (const ni of note.neighbors) {
+    const neighbor = notes[ni];
+    if (!neighbor.dead) {
+      const amount = 0.3 + Math.random() * 0.2;
+      infectNote(neighbor, amount);
+      if (neighbor.infection >= 1) {
+        explosionQueue.push(ni);
+      }
+    }
+  }
+
+  // Kill if heavily infected
+  if (note.infection >= 1) {
+    note.infection = 0.6 + Math.random() * 0.3; // partial reset, building toward death
+    if (Math.random() < 0.35) {
+      killNote(note);
+    }
+  }
+}
+
+function killNote(note) {
+  if (note.dead) return;
+  note.dead = true;
+  note.deathTime = performance.now();
+  spawnExplosion(note.x, note.y, '#8b0000');
+  playNote(60 + Math.random() * 30, 'triangle', 0.04, 0.2);
+}
+
+function spawnExplosion(x, y, color) {
+  for (let i = 0; i < 10; i++) {
+    const angle = Math.random() * Math.PI * 2;
+    const speed = 1 + Math.random() * 3;
+    particles.push({
+      x, y,
+      vx: Math.cos(angle) * speed,
+      vy: Math.sin(angle) * speed,
+      life: 0.7 + Math.random() * 0.3,
+      size: 2 + Math.random() * 3,
+      color: color,
+    });
+  }
+}
+
+// Process cascade queue
+function processCascades() {
+  if (explosionQueue.length === 0) return;
+  const batch = [...new Set(explosionQueue)];
+  explosionQueue = [];
+  for (const idx of batch) {
+    const note = notes[idx];
+    if (!note.dead && note.infection >= 1) {
+      explodeNote(note);
+    }
+  }
+  // Continue chain next frame
+  if (explosionQueue.length > 0) {
+    setTimeout(processCascades, 120);
+  }
+}
+
+// Click handler
+C.addEventListener('click', (e) => {
+  const rect = C.getBoundingClientRect();
+  const mx = (e.clientX - rect.left) * (W / rect.width);
+  const my = (e.clientY - rect.top) * (H / rect.height);
+  for (const note of notes) {
+    if (note.dead) continue;
+    const dx = mx - note.x, dy = my - note.y;
+    if (dx*dx + dy*dy < (HEX_SIZE-2)*(HEX_SIZE-2)) {
+      if (!startTime) startTime = performance.now();
+      infectNote(note, 1.0);
+      explosionQueue.push(note.id);
+      processCascades();
+      statusEl.textContent = 'PLAGUE SPREADING...';
+      statusEl.style.color = '#f84';
+      document.getElementById('instructions').style.opacity = '0';
+      break;
+    }
+  }
+});
+
+// Passive infection spread (slower than click cascade)
+let lastSpread = 0;
+function passiveSpread(now) {
+  if (now - lastSpread < 500) return;
+  lastSpread = now;
+  for (const note of notes) {
+    if (!note.infected || note.dead) continue;
+    if (note.infection > 0.5) {
+      for (const ni of note.neighbors) {
+        const neighbor = notes[ni];
+        if (!neighbor.dead && Math.random() < note.infection * 0.08) {
+          infectNote(neighbor, 0.15);
+        }
+      }
+    }
+    // Slow infection buildup
+    note.infection = Math.min(1, note.infection + 0.02);
+    if (note.infection >= 1 && !note.dead) {
+      explosionQueue.push(notes.indexOf(note));
+    }
+  }
+  if (explosionQueue.length > 0) processCascades();
+}
+
+// Draw hex
+function drawHex(x, y, size, fill, stroke, lineWidth) {
+  ctx.beginPath();
+  for (let i = 0; i < 6; i++) {
+    const angle = Math.PI / 180 * (60 * i - 30);
+    const px = x + size * Math.cos(angle);
+    const py = y + size * Math.sin(angle);
+    if (i === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
+  }
+  ctx.closePath();
+  if (fill) { ctx.fillStyle = fill; ctx.fill(); }
+  if (stroke) { ctx.strokeStyle = stroke; ctx.lineWidth = lineWidth || 1; ctx.stroke(); }
+}
+
+// Auto-start for screenshot
+let autoPhase = 0;
+function autoDemo() {
+  if (autoPhase === 0 && frame === 40) {
+    startTime = performance.now();
+    const center = notes[Math.floor(ROWS/2) * COLS + Math.floor(COLS/2)];
+    infectNote(center, 1.0);
+    explosionQueue.push(center.id);
+    processCascades();
+    statusEl.textContent = 'PLAGUE SPREADING...';
+    statusEl.style.color = '#f84';
+    autoPhase = 1;
+  }
+  if (autoPhase === 1 && frame === 60) {
+    // Second infection point
+    const corner = notes[2 * COLS + 3];
+    infectNote(corner, 1.0);
+    explosionQueue.push(corner.id);
+    processCascades();
+    autoPhase = 2;
+  }
+}
+
+function updateStats() {
+  const healthy = notes.filter(n => !n.infected && !n.dead).length;
+  const infected = notes.filter(n => n.infected && !n.dead).length;
+  const dead = notes.filter(n => n.dead).length;
+  const mutated = notes.filter(n => n.mutated).length;
+  document.getElementById('sH').textContent = healthy;
+  document.getElementById('sI').textContent = infected;
+  document.getElementById('sD').textContent = dead;
+  document.getElementById('sM').textContent = mutated;
+}
+
+function render(now) {
+  frame++;
+  const t = now / 1000;
+  autoDemo();
+  if (startTime) passiveSpread(now);
+
+  ctx.fillStyle = '#0a0a12';
+  ctx.fillRect(0, 0, W, H);
+
+  // Draw staff lines behind hex grid (4 horizontal lines)
+  ctx.strokeStyle = 'rgba(100,80,60,0.12)';
+  ctx.lineWidth = 1;
+  for (let l = 0; l < 5; l++) {
+    const ly = H * 0.18 + l * (H * 0.64 / 4);
+    ctx.beginPath();
+    ctx.moveTo(40, ly);
+    ctx.lineTo(W - 40, ly);
+    ctx.stroke();
+  }
+
+  // Draw notes
+  for (const note of notes) {
+    const nx = note.x + (note.infected ? Math.sin(t * 12 + note.tremorPhase) * note.tremor : 0);
+    const ny = note.y + (note.infected ? Math.cos(t * 10 + note.tremorPhase) * note.tremor * 0.5 : 0);
+
+    // Hex cell background
+    let bgAlpha = 0.05;
+    if (note.infected && !note.dead) {
+      const pulse = 0.5 + 0.5 * Math.sin(t * 4 + note.id);
+      bgAlpha = 0.05 + note.infection * 0.12 + pulse * note.infection * 0.05;
+    }
+
+    // Color based on infection level
+    let hexColor;
+    if (note.dead) {
+      hexColor = `rgba(80,10,10,0.15)`;
+    } else if (note.infection > 0.7) {
+      hexColor = `rgba(200,50,30,${bgAlpha})`;
+    } else if (note.infection > 0.3) {
+      hexColor = `rgba(220,140,40,${bgAlpha})`;
+    } else {
+      hexColor = `rgba(80,130,180,${bgAlpha})`;
+    }
+
+    drawHex(nx, ny, HEX_SIZE - 2, hexColor, `rgba(100,130,170,0.12)`, 1);
+
+    // Flash from explosion
+    if (note.flashAlpha > 0.01) {
+      note.flashAlpha *= 0.92;
+      const fc = note.dead ? 'rgba(180,20,10,' : 'rgba(255,160,40,';
+      drawHex(nx, ny, HEX_SIZE - 2, fc + note.flashAlpha * 0.5 + ')');
+    }
+
+    if (note.dead) {
+      // Dead note -- scattered fragments
+      const td = (now - note.deathTime) / 1000;
+      const fade = Math.max(0, 1 - td / 10);
+      if (fade > 0.01) {
+        ctx.save();
+        ctx.globalAlpha = fade * 0.4;
+        ctx.fillStyle = '#8b0000';
+        ctx.beginPath();
+        ctx.moveTo(nx-5, ny-5); ctx.lineTo(nx+5, ny+5);
+        ctx.moveTo(nx+5, ny-5); ctx.lineTo(nx-5, ny+5);
+        ctx.strokeStyle = '#8b0000'; ctx.lineWidth = 2; ctx.stroke();
+        ctx.restore();
+      }
+    } else if (note.infected) {
+      // Infected note -- pulsing, colored by infection level
+      const il = note.infection;
+      const r = Math.floor(60 + il * 195);
+      const g = Math.floor(200 - il * 160);
+      const b = Math.floor(80 - il * 60);
+      const noteColor = `rgb(${r},${g},${b})`;
+
+      // Infection aura
+      if (il > 0.2) {
+        const grad = ctx.createRadialGradient(nx, ny, 3, nx, ny, HEX_SIZE);
+        grad.addColorStop(0, `rgba(200,60,20,${il * 0.2})`);
+        grad.addColorStop(1, 'rgba(200,60,20,0)');
+        ctx.fillStyle = grad;
+        ctx.beginPath();
+        ctx.arc(nx, ny, HEX_SIZE, 0, Math.PI * 2);
+        ctx.fill();
+      }
+
+      // Note head
+      const pulse = 1 + Math.sin(t * 5 + note.id) * il * 0.2;
+      ctx.fillStyle = noteColor;
+      ctx.beginPath();
+      ctx.ellipse(nx, ny, 6 * pulse, 4.5 * pulse, -0.3, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Stem
+      ctx.strokeStyle = noteColor;
+      ctx.lineWidth = 1.5;
+      const stemX = nx + (note.stemDir > 0 ? 5 : -5);
+      ctx.beginPath();
+      ctx.moveTo(stemX, ny);
+      for (let sy = 0; sy < 25; sy += 3) {
+        ctx.lineTo(stemX + Math.sin(t * 6 + sy * 0.2 + note.id) * il * 1.5, ny + note.stemDir * -sy);
+      }
+      ctx.stroke();
+
+      // Mutation accidental
+      if (note.mutated) {
+        ctx.font = '12px Georgia';
+        ctx.fillStyle = '#c040e0';
+        ctx.fillText(note.mutationOffset > 0 ? '\u266F' : '\u266D', nx - 14, ny + 3);
+      }
+    } else {
+      // Healthy note
+      ctx.fillStyle = '#8ac';
+      ctx.beginPath();
+      ctx.ellipse(nx, ny, 6, 4.5, -0.3, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.strokeStyle = '#8ac';
+      ctx.lineWidth = 1.5;
+      const stemX = nx + (note.stemDir > 0 ? 5 : -5);
+      ctx.beginPath();
+      ctx.moveTo(stemX, ny);
+      ctx.lineTo(stemX, ny + note.stemDir * -25);
+      ctx.stroke();
+    }
+  }
+
+  // Particles
+  for (let i = particles.length - 1; i >= 0; i--) {
+    const p = particles[i];
+    p.x += p.vx; p.y += p.vy;
+    p.vy += 0.08; p.life -= 0.018;
+    if (p.life <= 0) { particles.splice(i, 1); continue; }
+    ctx.globalAlpha = p.life;
+    ctx.fillStyle = p.color;
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, p.size * p.life, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  ctx.globalAlpha = 1;
+
+  updateStats();
+
+  // Check if all dead
+  if (startTime && notes.every(n => n.dead)) {
+    statusEl.textContent = 'THE SYMPHONY IS SILENT';
+    statusEl.style.color = '#8b0000';
+  }
+
+  requestAnimationFrame(render);
+}
+
+requestAnimationFrame(render);
+</script>
+</body>
+</html>

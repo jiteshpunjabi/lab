@@ -1,0 +1,366 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=1280,height=720">
+<title>exp-049 — The Observer Dissolves the Observed</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+  width: 1280px; height: 720px; overflow: hidden;
+  background: #0a0a12;
+  font-family: 'Georgia', 'Times New Roman', serif;
+  cursor: none;
+}
+canvas { display: block; }
+#cursor-glow {
+  position: fixed; pointer-events: none; z-index: 999;
+  width: 120px; height: 120px; border-radius: 50%;
+  background: radial-gradient(circle, rgba(255,180,100,0.15) 0%, transparent 70%);
+  transform: translate(-50%, -50%);
+  mix-blend-mode: screen;
+}
+#instructions {
+  position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%);
+  color: rgba(255,255,255,0.25); font-size: 12px; letter-spacing: 2px;
+  font-family: monospace; z-index: 10; transition: opacity 4s;
+}
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="cursor-glow"></div>
+<div id="instructions">YOUR GAZE DESTROYS WHAT IT TOUCHES</div>
+<script>
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d');
+canvas.width = 1280;
+canvas.height = 720;
+
+const glow = document.getElementById('cursor-glow');
+const instructions = document.getElementById('instructions');
+
+const passages = [
+  "The act of observation collapses the wave function of meaning",
+  "Every word you read is a small death performed for your benefit",
+  "Memory is not storage but continuous reconstruction",
+  "To name a thing is to begin forgetting what it was before the name",
+  "The eye destroys what it loves most carefully",
+  "Between the retina and the mind lies an abyss of interpretation",
+  "What you remember is not what happened but what you last remembered",
+  "Attention is a beam that bleaches everything it illuminates",
+  "The unobserved universe is richer than the observed one",
+  "Each reading is a translation and every translation is a betrayal",
+  "Consciousness is the wound that matter inflicts upon itself",
+  "You cannot step into the same sentence twice",
+  "The words you skip are the ones that would have changed you",
+  "Forgetting is not failure but the mind composting itself",
+  "To perceive is to select and to select is to destroy alternatives",
+  "The page remembers what the reader forgets",
+  "Silence between words carries more meaning than the words themselves",
+  "What dissolves first: the ink or the idea?",
+  "A thought observed too closely becomes unthinkable",
+  "The most important things can only be seen from the corner of your eye",
+];
+
+class CharParticle {
+  constructor(char, x, y, lineIdx, wordIdx) {
+    this.char = char;
+    this.x = x;
+    this.y = y;
+    this.originX = x;
+    this.originY = y;
+    this.lineIdx = lineIdx;
+    this.wordIdx = wordIdx;
+    this.opacity = 0;
+    this.targetOpacity = 0.85;
+    this.decay = 0;
+    this.dissolved = false;
+    this.dx = 0;
+    this.dy = 0;
+    this.rotation = 0;
+    this.dRotation = 0;
+    this.scale = 1;
+    this.regenerateTimer = 0;
+    this.dissolvePhase = 0;
+    this.tremble = 0;
+    this.hue = 40 + Math.random() * 20;
+    this.fontSize = 18;
+    this.born = performance.now();
+  }
+}
+
+class Ash {
+  constructor(x, y, char, hue) {
+    this.x = x;
+    this.y = y;
+    this.char = char;
+    this.vx = (Math.random() - 0.5) * 2;
+    this.vy = -Math.random() * 2.5 - 0.3;
+    this.opacity = 0.5;
+    this.rotation = Math.random() * Math.PI * 2;
+    this.dRotation = (Math.random() - 0.5) * 0.08;
+    this.scale = 0.6 + Math.random() * 0.5;
+    this.hue = hue;
+    this.life = 1;
+  }
+  update() {
+    this.x += this.vx;
+    this.vy += 0.015;
+    this.vx *= 0.995;
+    this.y += this.vy;
+    this.rotation += this.dRotation;
+    this.life -= 0.006;
+    this.opacity = this.life * 0.35;
+    this.scale *= 0.999;
+    return this.life > 0;
+  }
+}
+
+let particles = [];
+let ashes = [];
+let mouseX = -500, mouseY = -500;
+let mouseActive = false;
+let lastMouseMove = 0;
+let totalDissolved = 0;
+let frame = 0;
+
+function layoutText() {
+  particles = [];
+  const lineHeight = 32;
+  const startY = 55;
+  const marginX = 80;
+  ctx.font = '18px Georgia';
+
+  for (let i = 0; i < passages.length; i++) {
+    const text = passages[i];
+    const y = startY + i * lineHeight;
+    if (y > 690) break;
+    let x = marginX;
+    let wordIdx = 0;
+    for (let j = 0; j < text.length; j++) {
+      const char = text[j];
+      if (char === ' ') wordIdx++;
+      const charWidth = ctx.measureText(char).width;
+      const p = new CharParticle(char, x + charWidth / 2, y, i, wordIdx);
+      p.born = performance.now() + i * 150 + j * 10;
+      particles.push(p);
+      x += charWidth;
+    }
+  }
+}
+
+function update(now) {
+  const idleTime = now - lastMouseMove;
+  const isIdle = idleTime > 2500;
+
+  if (frame > 250) instructions.style.opacity = '0';
+
+  for (const p of particles) {
+    if (now < p.born) continue;
+    const fadeInT = Math.min(1, (now - p.born) / 600);
+
+    if (p.dissolved) {
+      if (isIdle) {
+        p.regenerateTimer += 0.001;
+        if (p.regenerateTimer > 1) {
+          p.dissolved = false;
+          p.dissolvePhase = 0;
+          p.opacity = 0;
+          p.decay = 0;
+          p.dx = 0; p.dy = 0;
+          p.rotation = 0;
+          p.x = p.originX; p.y = p.originY;
+          p.scale = 1; p.tremble = 0;
+          p.regenerateTimer = 0;
+          p.born = now;
+          totalDissolved = Math.max(0, totalDissolved - 1);
+        }
+      }
+      continue;
+    }
+
+    const ddx = p.x - mouseX;
+    const ddy = p.y - mouseY;
+    const dist = Math.sqrt(ddx * ddx + ddy * ddy);
+    const influenceRadius = 200;
+
+    if (mouseActive && dist < influenceRadius) {
+      const intensity = 1 - (dist / influenceRadius);
+      p.decay += intensity * 0.035;
+
+      if (p.decay > 0.15 && p.dissolvePhase === 0) p.dissolvePhase = 1;
+      if (p.decay > 0.55 && p.dissolvePhase === 1) {
+        p.dissolvePhase = 2;
+        const angle = Math.atan2(ddy, ddx);
+        p.dx = Math.cos(angle) * intensity * 2.5;
+        p.dy = Math.sin(angle) * intensity * 2 - 0.8;
+        p.dRotation = (Math.random() - 0.5) * 0.06;
+      }
+      if (p.decay > 1.0) {
+        p.dissolved = true;
+        p.dissolvePhase = 3;
+        totalDissolved++;
+        for (let k = 0; k < 3; k++) {
+          ashes.push(new Ash(p.x + p.dx, p.y + p.dy, p.char, p.hue));
+        }
+      }
+    } else if (isIdle && p.decay > 0) {
+      p.decay = Math.max(0, p.decay - 0.002);
+      if (p.decay < 0.15) {
+        p.dissolvePhase = 0;
+        p.dx *= 0.92; p.dy *= 0.92;
+        p.rotation *= 0.92;
+      }
+    }
+
+    if (p.dissolvePhase === 1) {
+      p.tremble = Math.sin(now * 0.025 + p.originX * 0.15) * p.decay * 4;
+    }
+    if (p.dissolvePhase === 2) {
+      p.x += p.dx * 0.25;
+      p.y += p.dy * 0.25;
+      p.rotation += p.dRotation;
+      p.scale = Math.max(0.2, 1 - (p.decay - 0.55) * 2.2);
+    }
+
+    const decayFade = Math.max(0, 1 - p.decay * 0.8);
+    p.opacity = fadeInT * p.targetOpacity * decayFade;
+    p.hue = 40 - p.decay * 200;
+  }
+
+  ashes = ashes.filter(a => a.update());
+}
+
+function draw(now) {
+  ctx.fillStyle = '#0a0a12';
+  ctx.fillRect(0, 0, 1280, 720);
+
+  // Faint dot grid — the "page"
+  ctx.fillStyle = 'rgba(255, 255, 255, 0.015)';
+  for (let bx = 40; bx < 1240; bx += 40) {
+    for (let by = 30; by < 700; by += 32) {
+      ctx.fillRect(bx, by, 1, 1);
+    }
+  }
+
+  // Character particles
+  for (const p of particles) {
+    if (now < p.born || p.dissolved || p.opacity < 0.01) continue;
+
+    ctx.save();
+    const drawX = p.x + (p.dissolvePhase === 1 ? p.tremble : 0);
+    const drawY = p.y;
+
+    ctx.translate(drawX, drawY);
+    ctx.rotate(p.rotation);
+    ctx.scale(p.scale, p.scale);
+
+    const hue = Math.max(-160, p.hue);
+    const sat = 50 + p.decay * 50;
+    const light = 75 - p.decay * 35;
+
+    ctx.font = `${p.fontSize}px Georgia`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillStyle = `hsla(${hue}, ${sat}%, ${light}%, ${p.opacity})`;
+    ctx.fillText(p.char, 0, 0);
+
+    if (p.decay > 0.25) {
+      ctx.fillStyle = `hsla(${hue + 40}, 100%, 85%, ${p.opacity * p.decay * 0.25})`;
+      ctx.fillText(p.char, 0, 0);
+    }
+    ctx.restore();
+  }
+
+  // Ashes
+  for (const a of ashes) {
+    if (a.opacity < 0.01) continue;
+    ctx.save();
+    ctx.translate(a.x, a.y);
+    ctx.rotate(a.rotation);
+    ctx.scale(a.scale, a.scale);
+    ctx.font = '13px Georgia';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillStyle = `hsla(${a.hue - 30}, 40%, 45%, ${a.opacity})`;
+    ctx.fillText(a.char, 0, 0);
+    ctx.restore();
+  }
+
+  // Dissolution percentage
+  const pct = Math.round((totalDissolved / Math.max(1, particles.length)) * 100);
+  if (pct > 0) {
+    ctx.font = '11px monospace';
+    ctx.textAlign = 'right';
+    ctx.fillStyle = `rgba(255, 100, 80, ${Math.min(0.35, pct / 250)})`;
+    ctx.fillText(`${pct}% dissolved`, 1240, 705);
+  }
+
+  // Mouse influence glow
+  if (mouseActive) {
+    const gradient = ctx.createRadialGradient(mouseX, mouseY, 0, mouseX, mouseY, 200);
+    gradient.addColorStop(0, 'rgba(255, 140, 60, 0.04)');
+    gradient.addColorStop(0.4, 'rgba(255, 80, 40, 0.015)');
+    gradient.addColorStop(1, 'transparent');
+    ctx.fillStyle = gradient;
+    ctx.fillRect(mouseX - 220, mouseY - 220, 440, 440);
+  }
+}
+
+// Input
+document.addEventListener('mousemove', (e) => {
+  mouseX = e.clientX; mouseY = e.clientY;
+  mouseActive = true;
+  lastMouseMove = performance.now();
+  glow.style.left = e.clientX + 'px';
+  glow.style.top = e.clientY + 'px';
+});
+document.addEventListener('mouseleave', () => {
+  mouseActive = false; mouseX = -500; mouseY = -500;
+});
+
+layoutText();
+
+// Auto-sweep for screenshot visibility — two passes
+let autoFrame = 0;
+const pass1 = 120; // first sweep: upper area
+const pass2 = 240; // second sweep: middle area
+const autoEnd = 280; // then stop and let ashes drift
+
+function loop() {
+  const now = performance.now();
+  frame++;
+  if (autoFrame < pass1) {
+    const t = autoFrame / pass1;
+    mouseX = 100 + t * 900;
+    mouseY = 60 + t * 200;
+    mouseActive = true;
+    lastMouseMove = now;
+    autoFrame++;
+  } else if (autoFrame < pass2) {
+    const t = (autoFrame - pass1) / (pass2 - pass1);
+    mouseX = 900 - t * 800;
+    mouseY = 200 + t * 250;
+    mouseActive = true;
+    lastMouseMove = now;
+    autoFrame++;
+  } else if (autoFrame < autoEnd) {
+    // Linger near center
+    mouseX = 400 + Math.sin(autoFrame * 0.1) * 100;
+    mouseY = 350 + Math.cos(autoFrame * 0.08) * 50;
+    mouseActive = true;
+    lastMouseMove = now;
+    autoFrame++;
+  } else if (autoFrame === autoEnd) {
+    mouseActive = false; mouseX = -500; mouseY = -500;
+    autoFrame++;
+  }
+  update(now);
+  draw(now);
+  requestAnimationFrame(loop);
+}
+loop();
+</script>
+</body>
+</html>

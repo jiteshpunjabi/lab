@@ -1,0 +1,331 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>exp-007 — Harmonic Geometry</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: #0a0a1a;
+    overflow: hidden;
+    font-family: 'Courier New', monospace;
+    cursor: crosshair;
+  }
+  canvas { display: block; }
+  #prompt {
+    position: fixed;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    color: #7799cc;
+    font-size: 18px;
+    text-align: center;
+    pointer-events: none;
+    transition: opacity 0.8s;
+    line-height: 1.6;
+    text-shadow: 0 0 20px rgba(100,150,220,0.4);
+  }
+  #info {
+    position: fixed;
+    bottom: 16px;
+    left: 16px;
+    color: #445577;
+    font-size: 11px;
+    pointer-events: none;
+  }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="prompt">click anywhere to begin<br><span style="font-size:13px;color:#556688">move mouse to shape sound and light</span></div>
+<div id="info">exp-007 / harmonic geometry / webaudio + canvas</div>
+<script>
+(function() {
+  const canvas = document.getElementById('c');
+  const ctx = canvas.getContext('2d');
+  const prompt = document.getElementById('prompt');
+
+  let W, H;
+  function resize() {
+    W = canvas.width = window.innerWidth;
+    H = canvas.height = window.innerHeight;
+  }
+  resize();
+  window.addEventListener('resize', resize);
+
+  // Audio state
+  let audioCtx = null;
+  let analyser = null;
+  let dataArray = null;
+  let oscillators = [];
+  let gains = [];
+  let started = false;
+  let mouseX = 0.5, mouseY = 0.5;
+  let time = 0;
+
+  // Harmonic series: fundamental + overtones
+  const harmonicRatios = [1, 2, 3, 4, 5, 6, 7, 8];
+  const harmonicAmps =   [0.3, 0.15, 0.1, 0.08, 0.06, 0.04, 0.03, 0.02];
+
+  function initAudio() {
+    audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    analyser = audioCtx.createAnalyser();
+    analyser.fftSize = 512;
+    analyser.smoothingTimeConstant = 0.8;
+    dataArray = new Uint8Array(analyser.frequencyBinCount);
+
+    const masterGain = audioCtx.createGain();
+    masterGain.gain.value = 0.12;
+    masterGain.connect(analyser);
+    analyser.connect(audioCtx.destination);
+
+    // Create harmonic oscillators
+    for (let i = 0; i < harmonicRatios.length; i++) {
+      const osc = audioCtx.createOscillator();
+      const gain = audioCtx.createGain();
+
+      osc.type = i < 3 ? 'sine' : (i < 5 ? 'triangle' : 'square');
+      osc.frequency.value = 220 * harmonicRatios[i];
+      gain.gain.value = harmonicAmps[i];
+
+      osc.connect(gain);
+      gain.connect(masterGain);
+      osc.start();
+
+      oscillators.push(osc);
+      gains.push(gain);
+    }
+  }
+
+  function updateAudio() {
+    if (!audioCtx) return;
+
+    // Map mouseX to fundamental frequency (80 - 600 Hz)
+    const fundamental = 80 + mouseX * 520;
+
+    // Map mouseY to waveform morph and amplitude
+    const brightness = 1 - mouseY; // top = bright, bottom = dark
+
+    for (let i = 0; i < oscillators.length; i++) {
+      const targetFreq = fundamental * harmonicRatios[i];
+      oscillators[i].frequency.setTargetAtTime(targetFreq, audioCtx.currentTime, 0.05);
+
+      // Higher harmonics get louder as mouse moves up
+      const amp = harmonicAmps[i] * (0.3 + brightness * 1.5);
+      gains[i].gain.setTargetAtTime(amp, audioCtx.currentTime, 0.05);
+    }
+  }
+
+  // Color palette
+  function hslToRgb(h, s, l, a) {
+    return `hsla(${h}, ${s}%, ${l}%, ${a})`;
+  }
+
+  function drawFrequencyBars() {
+    if (!analyser) return;
+    analyser.getByteFrequencyData(dataArray);
+
+    const bars = dataArray.length;
+    const barW = W / bars;
+    const cx = W / 2;
+    const cy = H / 2;
+
+    // Draw mirrored frequency bars from center
+    for (let i = 0; i < bars; i++) {
+      const v = dataArray[i] / 255;
+      if (v < 0.02) continue;
+
+      const barH = v * H * 0.35;
+      const hue = 200 + v * 160; // blue -> magenta
+      const sat = 60 + v * 40;
+      const light = 20 + v * 50;
+
+      ctx.fillStyle = hslToRgb(hue, sat, light, 0.6 + v * 0.4);
+
+      // Left half mirrored
+      const x = cx - (i + 1) * barW;
+      ctx.fillRect(x, cy - barH / 2, barW - 1, barH);
+
+      // Right half mirrored
+      const x2 = cx + i * barW;
+      ctx.fillRect(x2, cy - barH / 2, barW - 1, barH);
+    }
+  }
+
+  function drawResonanceRings() {
+    if (!analyser) return;
+
+    const cx = W / 2;
+    const cy = H / 2;
+
+    // Sample a few frequency bands for ring sizes
+    const bands = [4, 16, 32, 64, 96, 128];
+
+    for (let b = 0; b < bands.length; b++) {
+      const v = dataArray[bands[b]] / 255;
+      if (v < 0.05) continue;
+
+      const radius = 50 + b * 60 + v * 80;
+      const hue = 180 + b * 30 + time * 10;
+      const alpha = v * 0.5;
+
+      ctx.beginPath();
+      ctx.arc(cx, cy, radius, 0, Math.PI * 2);
+      ctx.strokeStyle = hslToRgb(hue % 360, 70, 40 + v * 30, alpha);
+      ctx.lineWidth = 1 + v * 4;
+      ctx.stroke();
+
+      // Draw resonance nodes on each ring
+      const nodes = harmonicRatios[b] || 4;
+      for (let n = 0; n < nodes; n++) {
+        const angle = (Math.PI * 2 * n / nodes) + time * (0.3 + b * 0.1);
+        const nx = cx + Math.cos(angle) * radius;
+        const ny = cy + Math.sin(angle) * radius;
+        const nodeSize = 2 + v * 8;
+
+        ctx.beginPath();
+        ctx.arc(nx, ny, nodeSize, 0, Math.PI * 2);
+        ctx.fillStyle = hslToRgb((hue + 60) % 360, 80, 50 + v * 30, alpha * 1.5);
+        ctx.fill();
+      }
+    }
+  }
+
+  function drawWaveform() {
+    if (!analyser) return;
+
+    const timeData = new Uint8Array(analyser.frequencyBinCount);
+    analyser.getByteTimeDomainData(timeData);
+
+    ctx.beginPath();
+    const sliceW = W / timeData.length;
+
+    for (let i = 0; i < timeData.length; i++) {
+      const v = timeData[i] / 128.0;
+      const y = H / 2 + (v - 1) * H * 0.15;
+      if (i === 0) ctx.moveTo(0, y);
+      else ctx.lineTo(i * sliceW, y);
+    }
+
+    ctx.strokeStyle = hslToRgb(220, 60, 60, 0.25);
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+  }
+
+  function drawCenterGlow() {
+    if (!analyser) return;
+
+    // Overall energy
+    let energy = 0;
+    for (let i = 0; i < dataArray.length; i++) energy += dataArray[i];
+    energy = energy / (dataArray.length * 255);
+
+    const cx = W / 2;
+    const cy = H / 2;
+    const radius = 30 + energy * 150;
+
+    const grad = ctx.createRadialGradient(cx, cy, 0, cx, cy, radius);
+    const hue = 200 + mouseX * 100 + time * 20;
+    grad.addColorStop(0, hslToRgb(hue % 360, 80, 60, 0.4 * energy + 0.05));
+    grad.addColorStop(0.5, hslToRgb((hue + 30) % 360, 60, 40, 0.2 * energy));
+    grad.addColorStop(1, 'transparent');
+
+    ctx.fillStyle = grad;
+    ctx.fillRect(cx - radius, cy - radius, radius * 2, radius * 2);
+  }
+
+  function drawIdleVisual() {
+    // Pre-start ambient visual so screenshot isn't blank
+    const cx = W / 2;
+    const cy = H / 2;
+
+    // Draw harmonic circles
+    for (let i = 0; i < 8; i++) {
+      const radius = 60 + i * 55;
+      const hue = 200 + i * 20 + time * 15;
+      const pulse = 0.3 + 0.2 * Math.sin(time * 2 + i * 0.5);
+
+      ctx.beginPath();
+      ctx.arc(cx, cy, radius, 0, Math.PI * 2);
+      ctx.strokeStyle = hslToRgb(hue % 360, 60, 35, pulse);
+      ctx.lineWidth = 1.5;
+      ctx.stroke();
+
+      // Orbiting nodes
+      const nodes = i + 2;
+      for (let n = 0; n < nodes; n++) {
+        const angle = (Math.PI * 2 * n / nodes) + time * (0.5 - i * 0.05);
+        const nx = cx + Math.cos(angle) * radius;
+        const ny = cy + Math.sin(angle) * radius;
+        const size = 3 + Math.sin(time * 3 + n) * 1.5;
+
+        ctx.beginPath();
+        ctx.arc(nx, ny, size, 0, Math.PI * 2);
+        ctx.fillStyle = hslToRgb((hue + 60) % 360, 70, 50, pulse * 1.2);
+        ctx.fill();
+      }
+    }
+
+    // Center glow
+    const grad = ctx.createRadialGradient(cx, cy, 0, cx, cy, 80);
+    const glow = 0.15 + 0.05 * Math.sin(time * 1.5);
+    grad.addColorStop(0, hslToRgb(220, 80, 55, glow));
+    grad.addColorStop(1, 'transparent');
+    ctx.fillStyle = grad;
+    ctx.fillRect(cx - 80, cy - 80, 160, 160);
+
+    // Title
+    ctx.fillStyle = hslToRgb(220, 40, 50, 0.5 + 0.1 * Math.sin(time * 2));
+    ctx.font = '14px Courier New';
+    ctx.textAlign = 'center';
+    ctx.fillText('HARMONIC GEOMETRY', cx, cy + radius + 60);
+    ctx.font = '11px Courier New';
+    ctx.fillStyle = hslToRgb(220, 30, 40, 0.35);
+    ctx.fillText('8 oscillators / harmonic series / frequency spectrum', cx, cy + radius + 80);
+  }
+
+  function draw() {
+    // Fade trail
+    ctx.fillStyle = 'rgba(10, 10, 26, 0.15)';
+    ctx.fillRect(0, 0, W, H);
+
+    time += 0.016;
+
+    if (started) {
+      updateAudio();
+      drawWaveform();
+      drawFrequencyBars();
+      drawResonanceRings();
+      drawCenterGlow();
+    } else {
+      drawIdleVisual();
+    }
+
+    requestAnimationFrame(draw);
+  }
+
+  // Mouse handling
+  document.addEventListener('mousemove', function(e) {
+    mouseX = e.clientX / W;
+    mouseY = e.clientY / H;
+  });
+
+  document.addEventListener('click', function() {
+    if (!started) {
+      started = true;
+      prompt.style.opacity = '0';
+      initAudio();
+    }
+  });
+
+  // Auto-start the animation loop
+  // Clear canvas initially
+  ctx.fillStyle = '#0a0a1a';
+  ctx.fillRect(0, 0, W, H);
+
+  draw();
+})();
+</script>
+</body>
+</html>

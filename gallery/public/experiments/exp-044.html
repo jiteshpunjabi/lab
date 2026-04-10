@@ -1,0 +1,369 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>exp-044 — Strata</title>
+<style>
+  * { margin: 0; padding: 0; }
+  body { overflow: hidden; background: #000; }
+  canvas { display: block; width: 100vw; height: 100vh; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<script>
+const canvas = document.getElementById('c');
+const gl = canvas.getContext('webgl', { preserveDrawingBuffer: true });
+
+canvas.width = 1280;
+canvas.height = 720;
+gl.viewport(0, 0, canvas.width, canvas.height);
+
+function compileShader(type, src) {
+  const s = gl.createShader(type);
+  gl.shaderSource(s, src);
+  gl.compileShader(s);
+  if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) {
+    console.error(gl.getShaderInfoLog(s));
+    return null;
+  }
+  return s;
+}
+
+function createProgram(vs, fs) {
+  const p = gl.createProgram();
+  gl.attachShader(p, compileShader(gl.VERTEX_SHADER, vs));
+  gl.attachShader(p, compileShader(gl.FRAGMENT_SHADER, fs));
+  gl.linkProgram(p);
+  if (!gl.getProgramParameter(p, gl.LINK_STATUS)) {
+    console.error(gl.getProgramInfoLog(p));
+    return null;
+  }
+  return p;
+}
+
+const quadVS = `
+attribute vec2 a_pos;
+varying vec2 v_uv;
+void main() {
+  v_uv = a_pos * 0.5 + 0.5;
+  gl_Position = vec4(a_pos, 0.0, 1.0);
+}`;
+
+const terrainFS = `
+precision highp float;
+varying vec2 v_uv;
+uniform float u_time;
+uniform vec2 u_resolution;
+
+// Simplex-like noise via classic hash
+vec3 mod289(vec3 x) { return x - floor(x * (1.0/289.0)) * 289.0; }
+vec4 mod289(vec4 x) { return x - floor(x * (1.0/289.0)) * 289.0; }
+vec4 permute(vec4 x) { return mod289(((x*34.0)+1.0)*x); }
+vec4 taylorInvSqrt(vec4 r) { return 1.79284291400159 - 0.85373472095314 * r; }
+
+float snoise(vec3 v) {
+  const vec2 C = vec2(1.0/6.0, 1.0/3.0);
+  const vec4 D = vec4(0.0, 0.5, 1.0, 2.0);
+  vec3 i = floor(v + dot(v, C.yyy));
+  vec3 x0 = v - i + dot(i, C.xxx);
+  vec3 g = step(x0.yzx, x0.xyz);
+  vec3 l = 1.0 - g;
+  vec3 i1 = min(g.xyz, l.zxy);
+  vec3 i2 = max(g.xyz, l.zxy);
+  vec3 x1 = x0 - i1 + C.xxx;
+  vec3 x2 = x0 - i2 + C.yyy;
+  vec3 x3 = x0 - D.yyy;
+  i = mod289(i);
+  vec4 p = permute(permute(permute(
+    i.z + vec4(0.0, i1.z, i2.z, 1.0))
+    + i.y + vec4(0.0, i1.y, i2.y, 1.0))
+    + i.x + vec4(0.0, i1.x, i2.x, 1.0));
+  float n_ = 0.142857142857;
+  vec3 ns = n_ * D.wyz - D.xzx;
+  vec4 j = p - 49.0 * floor(p * ns.z * ns.z);
+  vec4 x_ = floor(j * ns.z);
+  vec4 y_ = floor(j - 7.0 * x_);
+  vec4 x = x_ * ns.x + ns.yyyy;
+  vec4 y = y_ * ns.x + ns.yyyy;
+  vec4 h = 1.0 - abs(x) - abs(y);
+  vec4 b0 = vec4(x.xy, y.xy);
+  vec4 b1 = vec4(x.zw, y.zw);
+  vec4 s0 = floor(b0)*2.0 + 1.0;
+  vec4 s1 = floor(b1)*2.0 + 1.0;
+  vec4 sh = -step(h, vec4(0.0));
+  vec4 a0 = b0.xzyw + s0.xzyw*sh.xxyy;
+  vec4 a1 = b1.xzyw + s1.xzyw*sh.zzww;
+  vec3 p0 = vec3(a0.xy, h.x);
+  vec3 p1 = vec3(a0.zw, h.y);
+  vec3 p2 = vec3(a1.xy, h.z);
+  vec3 p3 = vec3(a1.zw, h.w);
+  vec4 norm = taylorInvSqrt(vec4(dot(p0,p0), dot(p1,p1), dot(p2,p2), dot(p3,p3)));
+  p0 *= norm.x; p1 *= norm.y; p2 *= norm.z; p3 *= norm.w;
+  vec4 m = max(0.6 - vec4(dot(x0,x0), dot(x1,x1), dot(x2,x2), dot(x3,x3)), 0.0);
+  m = m * m;
+  return 42.0 * dot(m*m, vec4(dot(p0,x0), dot(p1,x1), dot(p2,x2), dot(p3,x3)));
+}
+
+// Fractal Brownian Motion with domain warping
+float fbm(vec3 p, int octaves) {
+  float val = 0.0;
+  float amp = 0.5;
+  float freq = 1.0;
+  for (int i = 0; i < 8; i++) {
+    if (i >= octaves) break;
+    val += amp * snoise(p * freq);
+    freq *= 2.03;
+    amp *= 0.49;
+    p.xy += vec2(0.3, -0.7);
+  }
+  return val;
+}
+
+// Terrain height with tectonic uplift and erosion
+float terrain(vec2 p, float t) {
+  // Slow tectonic drift
+  float drift = t * 0.02;
+  vec3 q = vec3(p, drift);
+
+  // Large-scale continental shapes
+  float continental = fbm(q * 0.3, 4) * 1.8;
+
+  // Mountain ridges — domain-warped for realism
+  vec2 warp = vec2(
+    snoise(vec3(p * 0.5, drift * 0.7)),
+    snoise(vec3(p * 0.5 + 5.2, drift * 0.7))
+  );
+  float ridges = fbm(vec3((p + warp * 0.8) * 0.7, drift * 0.5), 6);
+  ridges = abs(ridges); // Ridged noise
+  ridges = pow(ridges, 1.5) * 2.0;
+
+  // Fine erosion detail
+  float erosion = fbm(vec3(p * 2.0 + warp * 0.3, drift * 1.5), 7) * 0.15;
+
+  // Thermal erosion: smooth peaks, sharpen valleys
+  float raw = continental + ridges - erosion;
+  float eroded = raw - smoothstep(0.3, 1.5, raw) * 0.3;
+
+  // River channels — carved by noise-based flow paths
+  float rivers = snoise(vec3(p * 1.5 + warp * 1.2, drift * 0.3));
+  rivers = 1.0 - smoothstep(0.0, 0.06, abs(rivers));
+  eroded -= rivers * 0.15;
+
+  return eroded;
+}
+
+// Raymarched terrain rendering
+vec3 calcNormal(vec2 p, float t) {
+  float eps = 0.002;
+  float h = terrain(p, t);
+  return normalize(vec3(
+    terrain(p - vec2(eps, 0.0), t) - terrain(p + vec2(eps, 0.0), t),
+    2.0 * eps,
+    terrain(p - vec2(0.0, eps), t) - terrain(p + vec2(0.0, eps), t)
+  ));
+}
+
+// Sedimentary strata colors based on height and slope
+vec3 strataColor(float h, float slope, float t) {
+  // Deep ocean
+  vec3 ocean = vec3(0.04, 0.06, 0.12);
+  // Coastal sediment
+  vec3 sand = vec3(0.76, 0.70, 0.55);
+  // Lowland clay
+  vec3 clay = vec3(0.55, 0.38, 0.25);
+  // Forest
+  vec3 forest = vec3(0.22, 0.32, 0.14);
+  // Exposed rock / slate
+  vec3 slate = vec3(0.42, 0.38, 0.35);
+  // Alpine rust
+  vec3 rust = vec3(0.58, 0.32, 0.16);
+  // Snow / chalk
+  vec3 chalk = vec3(0.92, 0.90, 0.86);
+
+  // Height-based layering
+  float seaLevel = -0.1 + sin(t * 0.1) * 0.05;
+
+  vec3 col = ocean;
+  col = mix(col, sand, smoothstep(seaLevel - 0.05, seaLevel + 0.02, h));
+  col = mix(col, clay, smoothstep(seaLevel, seaLevel + 0.2, h));
+  col = mix(col, forest, smoothstep(seaLevel + 0.1, seaLevel + 0.4, h));
+  col = mix(col, slate, smoothstep(0.4, 0.7, h));
+  col = mix(col, rust, smoothstep(0.6, 1.0, h));
+  col = mix(col, chalk, smoothstep(1.0, 1.4, h));
+
+  // Steep slopes reveal bare rock regardless of height
+  col = mix(col, slate * 0.8, smoothstep(0.6, 0.9, slope));
+
+  // Subtle horizontal strata banding
+  float band = sin(h * 40.0 + snoise(vec3(h * 10.0, 0.0, t * 0.05)) * 3.0) * 0.5 + 0.5;
+  col = mix(col, col * 0.85, band * 0.15 * smoothstep(0.5, 0.8, slope));
+
+  return col;
+}
+
+void main() {
+  vec2 uv = v_uv;
+  float aspect = u_resolution.x / u_resolution.y;
+  float t = u_time;
+
+  // Camera setup — low sweeping view showing horizon and sky
+  float camAngle = t * 0.02 + 0.8;
+  vec3 camPos = vec3(
+    sin(camAngle) * 1.5,
+    1.2 + sin(t * 0.05) * 0.2,
+    cos(camAngle) * 1.5
+  );
+  // Look outward toward horizon — forward direction tangent to orbit
+  vec3 camTarget = vec3(
+    sin(camAngle + 0.3) * 4.0,
+    0.4,
+    cos(camAngle + 0.3) * 4.0
+  );
+
+  vec3 forward = normalize(camTarget - camPos);
+  vec3 right = normalize(cross(forward, vec3(0.0, 1.0, 0.0)));
+  vec3 up = cross(right, forward);
+
+  vec2 screen = (uv - 0.5) * vec2(aspect, 1.0);
+  vec3 rd = normalize(forward * 2.0 + right * screen.x + up * screen.y);
+
+  // Raymarch the heightfield
+  vec3 col = vec3(0.0);
+  float tRay = 0.0;
+  bool hit = false;
+  vec3 hitPos;
+
+  for (int i = 0; i < 200; i++) {
+    hitPos = camPos + rd * tRay;
+    float h = terrain(hitPos.xz, t);
+    float diff = hitPos.y - h;
+
+    if (diff < 0.002) {
+      hit = true;
+      break;
+    }
+
+    // Adaptive step size
+    tRay += max(diff * 0.5, 0.005);
+
+    if (tRay > 12.0) break;
+  }
+
+  if (hit) {
+    vec3 normal = calcNormal(hitPos.xz, t);
+    float h = terrain(hitPos.xz, t);
+    float slope = 1.0 - normal.y;
+
+    // Time-of-day lighting cycle — starts at golden hour
+    float dayPhase = t * 0.12 + 1.0;
+    float sunAngle = dayPhase;
+    vec3 sunDir = normalize(vec3(
+      cos(sunAngle) * 0.7,
+      0.45 + sin(sunAngle) * 0.4,
+      sin(sunAngle) * 0.7
+    ));
+
+    // Sun color shifts: warm gold at dawn, white at noon, amber at dusk
+    float sunHeight = sunDir.y;
+    vec3 sunCol = mix(
+      vec3(1.4, 0.5, 0.2),   // dawn/dusk
+      vec3(1.1, 1.05, 1.0),  // noon
+      smoothstep(0.0, 0.6, sunHeight)
+    );
+
+    // Diffuse lighting
+    float diff = max(dot(normal, sunDir), 0.0);
+
+    // Ambient with sky bounce
+    vec3 skyCol = mix(vec3(0.15, 0.12, 0.2), vec3(0.4, 0.5, 0.7), smoothstep(-0.1, 0.4, sunHeight));
+    float amb = 0.2 + 0.15 * normal.y;
+
+    // Self-shadowing approximation
+    float shadow = 1.0;
+    vec2 shadowPos = hitPos.xz + sunDir.xz * 0.1;
+    float shadowH = terrain(shadowPos, t);
+    shadow = smoothstep(0.0, 0.08, h - shadowH + sunDir.y * 0.1);
+
+    vec3 matCol = strataColor(h, slope, t);
+
+    col = matCol * (diff * sunCol * shadow + amb * skyCol);
+
+    // Specular on water
+    float seaLevel = -0.1 + sin(t * 0.1) * 0.05;
+    if (h < seaLevel + 0.02) {
+      vec3 refl = reflect(-sunDir, normal);
+      float spec = pow(max(dot(refl, -rd), 0.0), 32.0);
+      col += spec * sunCol * 0.5;
+
+      // Water tint
+      float depth = max(seaLevel - h, 0.0);
+      col = mix(col, vec3(0.05, 0.12, 0.2), smoothstep(0.0, 0.3, depth));
+    }
+
+    // Atmospheric fog — distance and height based
+    float dist = length(hitPos - camPos);
+    vec3 fogCol = mix(skyCol, sunCol * 0.3, smoothstep(0.0, 0.5, sunHeight));
+    float fog = 1.0 - exp(-dist * 0.15);
+    col = mix(col, fogCol, fog);
+
+    // Height fog in valleys
+    float valleyFog = exp(-max(h, 0.0) * 5.0) * 0.3;
+    col = mix(col, fogCol * 0.8, valleyFog * (1.0 - fog));
+  } else {
+    // Sky
+    float sunAngle = t * 0.12 + 1.0;
+    vec3 sunDir = normalize(vec3(cos(sunAngle) * 0.7, 0.45 + sin(sunAngle) * 0.4, sin(sunAngle) * 0.7));
+    float sunHeight = sunDir.y;
+
+    vec3 skyTop = mix(vec3(0.08, 0.05, 0.15), vec3(0.3, 0.45, 0.75), smoothstep(-0.1, 0.4, sunHeight));
+    vec3 skyHorizon = mix(vec3(0.25, 0.15, 0.1), vec3(0.6, 0.65, 0.7), smoothstep(-0.1, 0.3, sunHeight));
+    col = mix(skyHorizon, skyTop, smoothstep(0.0, 0.5, rd.y));
+
+    // Sun disc
+    float sunDot = max(dot(rd, sunDir), 0.0);
+    col += pow(sunDot, 256.0) * vec3(1.0, 0.9, 0.7) * 2.0;
+    col += pow(sunDot, 8.0) * vec3(1.0, 0.6, 0.3) * 0.15;
+  }
+
+  // Tone mapping and gamma — warm and lifted
+  col *= 1.6;
+  col = col / (col + 1.0);
+  col = pow(col, vec3(0.75));
+
+  // Subtle vignette
+  float vig = 1.0 - 0.3 * dot(uv - 0.5, uv - 0.5) * 2.0;
+  col *= vig;
+
+  gl_FragColor = vec4(col, 1.0);
+}`;
+
+const prog = createProgram(quadVS, terrainFS);
+gl.useProgram(prog);
+
+const buf = gl.createBuffer();
+gl.bindBuffer(gl.ARRAY_BUFFER, buf);
+gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1,-1, 1,-1, -1,1, 1,1]), gl.STATIC_DRAW);
+
+const aPos = gl.getAttribLocation(prog, 'a_pos');
+gl.enableVertexAttribArray(aPos);
+gl.vertexAttribPointer(aPos, 2, gl.FLOAT, false, 0, 0);
+
+const uTime = gl.getUniformLocation(prog, 'u_time');
+const uRes = gl.getUniformLocation(prog, 'u_resolution');
+gl.uniform2f(uRes, canvas.width, canvas.height);
+
+const start = performance.now();
+
+function render() {
+  const t = (performance.now() - start) / 1000.0;
+  gl.uniform1f(uTime, t);
+  gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+  requestAnimationFrame(render);
+}
+
+render();
+</script>
+</body>
+</html>

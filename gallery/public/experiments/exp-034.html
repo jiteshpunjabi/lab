@@ -1,0 +1,440 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=1280,height=720">
+<title>exp-034 — Phylogeny</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { background: #0a0a12; overflow: hidden; font-family: 'Courier New', monospace; }
+canvas { display: block; }
+#tooltip {
+  position: fixed; pointer-events: none; opacity: 0;
+  background: rgba(10,10,18,0.92); border: 1px solid rgba(255,255,255,0.15);
+  border-radius: 6px; padding: 10px 14px; color: #ccc; font-size: 11px;
+  max-width: 320px; line-height: 1.5; z-index: 10;
+  transition: opacity 0.2s;
+  backdrop-filter: blur(8px);
+}
+#tooltip .title { color: #fff; font-size: 13px; font-weight: bold; margin-bottom: 4px; }
+#tooltip .score { color: #ffd866; }
+#tooltip .status { display: inline-block; padding: 1px 6px; border-radius: 3px; font-size: 10px; margin-left: 6px; }
+#tooltip .niche-tag { display: inline-block; padding: 1px 5px; border-radius: 3px; font-size: 9px; margin: 1px 2px; background: rgba(255,255,255,0.08); color: #aaa; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="tooltip"></div>
+<script>
+// --- THE COLONY'S DATA (embedded snapshot) ---
+const EXPERIMENTS = [
+  {id:"exp-001",title:"Mouse Reactive Particle Field",parents:[],generation:1,children:[],status:"declining",score:2,scores:{novelty:2,surprise:1,aesthetics:2,craft:3},niches:["canvas-2d"],review:"A standard particle repulsion demo with no visual output."},
+  {id:"exp-002",title:"Wave Interference Visualizer",parents:[],generation:1,children:[],status:"declining",score:1.8,scores:{novelty:3,surprise:1,aesthetics:1,craft:2},niches:["canvas-2d"],review:"Broken code produces a completely black screen."},
+  {id:"exp-003",title:"Particle Field Reaction",parents:[],generation:1,children:[],status:"declining",score:1,scores:{novelty:1,surprise:1,aesthetics:1,craft:1},niches:["canvas-2d"],review:"Near-duplicate of exp-001 with a critical bug."},
+  {id:"exp-004",title:"Chaotic Particle Flow",parents:[],generation:1,children:[],status:"declining",score:1,scores:{novelty:1,surprise:1,aesthetics:1,craft:1},niches:["canvas-2d"],review:"Another broken Gemma-era particle system. Black screen."},
+  {id:"exp-005",title:"Evolving Energy Field",parents:[],generation:1,children:[],status:"declining",score:1.3,scores:{novelty:2,surprise:1,aesthetics:1,craft:1},niches:["canvas-2d","physics"],review:"Crashes on the first frame. Dark navy void."},
+  {id:"exp-006",title:"Chromatic Tessellation",parents:[],generation:2,children:["exp-012","exp-024"],status:"fertile",score:7.9,scores:{novelty:8,surprise:7,aesthetics:9,craft:8},niches:["shader","generative-math"],review:"The gallery's first real visual triumph."},
+  {id:"exp-007",title:"Harmonic Geometry",parents:[],generation:2,children:["exp-013"],status:"fertile",score:7.1,scores:{novelty:8,surprise:7,aesthetics:6,craft:7},niches:["audio","canvas-2d","generative-math"],review:"The gallery's first audio experiment."},
+  {id:"exp-008",title:"Mitosis",parents:[],generation:2,children:["exp-012","exp-013"],status:"fertile",score:8.7,scores:{novelty:9,surprise:9,aesthetics:8,craft:8},niches:["css","dom"],review:"The gallery's most surprising entry: a fully realized living cell built from pure CSS."},
+  {id:"exp-009",title:"Liquid Typography",parents:[],generation:3,children:["exp-022"],status:"fertile",score:7.6,scores:{novelty:8,surprise:7,aesthetics:8,craft:7},niches:["canvas-2d","typography","physics"],review:"Swirling rivers of Unicode glyphs."},
+  {id:"exp-010",title:"Phototaxis",parents:[],generation:3,children:[],status:"alive",score:6.9,scores:{novelty:7,surprise:6,aesthetics:8,craft:7},niches:["canvas-2d","physics"],review:"Translucent cells on a sunlit cream field."},
+  {id:"exp-011",title:"Murmuration",parents:[],generation:3,children:["exp-023"],status:"fertile",score:7.0,scores:{novelty:7,surprise:7,aesthetics:7,craft:7},niches:["canvas-2d","multi-agent","physics"],review:"400 boids with spatial hashing flock in cyan-purple waves."},
+  {id:"exp-012",title:"Stained Glass Organism",parents:["exp-006","exp-008"],generation:3,children:[],status:"alive",score:7.6,scores:{novelty:8,surprise:7,aesthetics:8,craft:7},niches:["shader","css","dom"],review:"A true hybrid offspring."},
+  {id:"exp-013",title:"Resonant Colony",parents:["exp-007","exp-008"],generation:3,children:[],status:"alive",score:6.8,scores:{novelty:8,surprise:6,aesthetics:6,craft:7},niches:["canvas-2d","audio"],review:"Maps cell division to harmonic frequency."},
+  {id:"exp-014",title:"Fractal Abyss",parents:[],generation:3,children:[],status:"fertile",score:5.0,scores:{novelty:4,surprise:4,aesthetics:7,craft:7},niches:["shader","generative-math","input"],review:"A competent Mandelbrot/Julia explorer."},
+  {id:"exp-015",title:"Impossible Garden",parents:[],generation:3,children:[],status:"fertile",score:5.8,scores:{novelty:7,surprise:4,aesthetics:6,craft:7},niches:["3d","generative-math"],review:"Opens the 3D niche with parametric geometry."},
+  {id:"exp-016",title:"Morphogenesis",parents:[],generation:3,children:["exp-024"],status:"fertile",score:7.2,scores:{novelty:7,surprise:7,aesthetics:8,craft:7},niches:["canvas-2d","physics","generative-math"],review:"Gray-Scott reaction-diffusion with vivid Turing patterns."},
+  {id:"exp-017",title:"Dissolution Mirror",parents:[],generation:3,children:[],status:"fertile",score:6.8,scores:{novelty:7,surprise:6,aesthetics:8,craft:6},niches:["canvas-2d","input"],review:"Pixel sorting applied to webcam or generated noise."},
+  {id:"exp-018",title:"Lenia",parents:[],generation:3,children:["exp-023"],status:"fertile",score:7.8,scores:{novelty:8,surprise:8,aesthetics:7,craft:8},niches:["shader","generative-math","physics"],review:"GPU-accelerated continuous cellular automata."},
+  {id:"exp-019",title:"Abyssal Bloom",parents:[],generation:3,children:[],status:"fertile",score:5.8,scores:{novelty:7,surprise:5,aesthetics:5,craft:6},niches:["svg","generative-math"],review:"feTurbulence-driven SVG deep-sea flower."},
+  {id:"exp-020",title:"DOM Decay",parents:[],generation:3,children:["exp-022"],status:"alive",score:8.2,scores:{novelty:9,surprise:8,aesthetics:8,craft:7},niches:["dom","css"],review:"880 HTML form elements animated through lifecycle phases."},
+  {id:"exp-021",title:"Cellular Composition",parents:[],generation:3,children:[],status:"alive",score:6.2,scores:{novelty:7,surprise:6,aesthetics:5,craft:7},niches:["audio","generative-math","canvas-2d"],review:"Rule 110 mapped to pentatonic melody."},
+  {id:"exp-022",title:"Typographic Decay",parents:["exp-020","exp-009"],generation:4,children:[],status:"alive",score:null,scores:{novelty:null,surprise:null,aesthetics:null,craft:null},niches:["dom","typography","physics"],review:null},
+  {id:"exp-023",title:"Emergent Ecosystem",parents:["exp-018","exp-011"],generation:4,children:[],status:"alive",score:null,scores:{novelty:null,surprise:null,aesthetics:null,craft:null},niches:["shader","multi-agent","physics","generative-math"],review:null},
+  {id:"exp-024",title:"Stained Glass Morphogenesis",parents:["exp-006","exp-016"],generation:4,children:[],status:"alive",score:null,scores:{novelty:null,surprise:null,aesthetics:null,craft:null},niches:["shader","generative-math","physics"],review:null},
+];
+
+// --- SETUP ---
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d');
+const tooltip = document.getElementById('tooltip');
+const W = 1280, H = 720;
+canvas.width = W; canvas.height = H;
+
+let mx = -999, my = -999;
+let hoveredExp = null;
+let mouseActive = false;
+let time = 0;
+
+// --- COLOR PALETTES ---
+const statusColors = {
+  declining: [120, 60, 80],
+  alive: [80, 180, 220],
+  fertile: [220, 180, 60],
+};
+const nicheColors = {
+  'canvas-2d': '#4ecdc4', 'shader': '#ff6b6b', 'css': '#c44dff',
+  'dom': '#ff9f43', 'audio': '#54a0ff', 'physics': '#5f27cd',
+  'typography': '#feca57', 'generative-math': '#48dbfb', 'svg': '#ff6348',
+  'multi-agent': '#1dd1a1', '3d': '#f368e0', 'input': '#ff9ff3',
+};
+
+// --- LAYOUT: Force-directed by generation ---
+const nodes = [];
+const idMap = {};
+
+// Count experiments per generation to space them evenly
+const genCounts = {};
+const genIndex = {};
+EXPERIMENTS.forEach(exp => {
+  genCounts[exp.generation] = (genCounts[exp.generation] || 0) + 1;
+  genIndex[exp.id] = genCounts[exp.generation] - 1;
+});
+
+EXPERIMENTS.forEach((exp, i) => {
+  const gen = exp.generation;
+  const score = exp.score || 3;
+  const baseRadius = 8 + score * 3;
+  const countInGen = genCounts[gen];
+  const idxInGen = genIndex[exp.id];
+  const spacing = Math.min(120, (H - 120) / countInGen);
+  const startY = H/2 - (countInGen - 1) * spacing / 2;
+  const node = {
+    exp,
+    x: 120 + (gen - 1) * 280 + (Math.random() - 0.5) * 40,
+    y: startY + idxInGen * spacing + (Math.random() - 0.5) * 20,
+    vx: 0, vy: 0,
+    radius: baseRadius,
+    baseRadius: baseRadius,
+    phase: Math.random() * Math.PI * 2,
+    nicheParticles: [],
+  };
+  // niche satellite particles
+  exp.niches.forEach((n, j) => {
+    const angle = (j / exp.niches.length) * Math.PI * 2;
+    node.nicheParticles.push({
+      niche: n,
+      angle,
+      dist: baseRadius + 12,
+      phase: Math.random() * Math.PI * 2,
+    });
+  });
+  nodes.push(node);
+  idMap[exp.id] = node;
+});
+
+// --- EDGES ---
+const edges = [];
+EXPERIMENTS.forEach(exp => {
+  exp.parents.forEach(pid => {
+    if (idMap[pid]) {
+      edges.push({ from: idMap[pid], to: idMap[exp.id], pulse: Math.random() * Math.PI * 2 });
+    }
+  });
+});
+
+// --- FORCE SIMULATION ---
+function simulate() {
+  const dt = 0.3;
+  // repulsion between all nodes
+  for (let i = 0; i < nodes.length; i++) {
+    for (let j = i + 1; j < nodes.length; j++) {
+      const a = nodes[i], b = nodes[j];
+      let dx = b.x - a.x, dy = b.y - a.y;
+      let d = Math.sqrt(dx*dx + dy*dy) || 1;
+      const minDist = a.radius + b.radius + 30;
+      if (d < minDist) {
+        const f = (minDist - d) * 0.05;
+        const fx = (dx/d) * f, fy = (dy/d) * f;
+        a.vx -= fx; a.vy -= fy;
+        b.vx += fx; b.vy += fy;
+      }
+    }
+  }
+  // attraction along edges
+  edges.forEach(e => {
+    let dx = e.to.x - e.from.x, dy = e.to.y - e.from.y;
+    let d = Math.sqrt(dx*dx + dy*dy) || 1;
+    const target = 180;
+    const f = (d - target) * 0.003;
+    const fx = (dx/d) * f, fy = (dy/d) * f;
+    e.from.vx += fx; e.from.vy += fy;
+    e.to.vx -= fx; e.to.vy -= fy;
+  });
+  // generation columns (soft constraint)
+  nodes.forEach(n => {
+    const targetX = 120 + (n.exp.generation - 1) * 280;
+    n.vx += (targetX - n.x) * 0.01;
+    // keep in bounds
+    if (n.y < 60) n.vy += 2;
+    if (n.y > H - 60) n.vy -= 2;
+    if (n.x < 60) n.vx += 2;
+    if (n.x > W - 60) n.vx -= 2;
+    // damping
+    n.vx *= 0.92; n.vy *= 0.92;
+    n.x += n.vx * dt;
+    n.y += n.vy * dt;
+  });
+}
+
+// --- MOUSE ---
+canvas.addEventListener('mousemove', e => {
+  mouseActive = true;
+  const rect = canvas.getBoundingClientRect();
+  mx = (e.clientX - rect.left) * (W / rect.width);
+  my = (e.clientY - rect.top) * (H / rect.height);
+  // find hovered
+  hoveredExp = null;
+  let minD = Infinity;
+  nodes.forEach(n => {
+    const d = Math.hypot(mx - n.x, my - n.y);
+    if (d < n.radius + 15 && d < minD) {
+      minD = d;
+      hoveredExp = n;
+    }
+  });
+  if (hoveredExp && mouseActive) {
+    const exp = hoveredExp.exp;
+    const sc = exp.scores;
+    const statusClass = exp.status;
+    const statusColor = statusColors[exp.status] || [150,150,150];
+    tooltip.innerHTML = `
+      <div class="title">${exp.id} — ${exp.title}</div>
+      <span class="status" style="background:rgba(${statusColor.join(',')},0.3);color:rgb(${statusColor.join(',')})">${exp.status}</span>
+      ${exp.score !== null ? `<span class="score"> ★ ${exp.score}</span>` : '<span style="color:#666"> unscored</span>'}
+      <br><span style="color:#888;font-size:10px">Gen ${exp.generation}${exp.parents.length ? ' — parents: ' + exp.parents.join(', ') : ''}</span>
+      ${sc.novelty !== null ? `<br><span style="color:#666;font-size:10px">N:${sc.novelty} S:${sc.surprise} A:${sc.aesthetics} C:${sc.craft}</span>` : ''}
+      <div style="margin-top:4px">${exp.niches.map(n => `<span class="niche-tag" style="border-left:2px solid ${nicheColors[n] || '#555'}">${n}</span>`).join('')}</div>
+      ${exp.review ? `<div style="margin-top:6px;color:#777;font-size:10px;font-style:italic">"${exp.review}"</div>` : ''}
+    `;
+    tooltip.style.opacity = 1;
+    tooltip.style.left = Math.min(e.clientX + 16, window.innerWidth - 340) + 'px';
+    tooltip.style.top = Math.min(e.clientY - 10, window.innerHeight - 200) + 'px';
+  } else {
+    tooltip.style.opacity = 0;
+  }
+});
+
+// --- DRAW ---
+function draw() {
+  time += 0.016;
+  // simulate physics
+  for (let i = 0; i < 3; i++) simulate();
+
+  ctx.fillStyle = '#0a0a12';
+  ctx.fillRect(0, 0, W, H);
+
+  // subtle grid
+  ctx.strokeStyle = 'rgba(255,255,255,0.02)';
+  ctx.lineWidth = 1;
+  for (let x = 0; x < W; x += 40) {
+    ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, H); ctx.stroke();
+  }
+  for (let y = 0; y < H; y += 40) {
+    ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(W, y); ctx.stroke();
+  }
+
+  // ambient dust
+  dust.forEach(d => {
+    d.x += d.vx + Math.sin(time * 0.5 + d.phase) * 0.15;
+    d.y += d.vy + Math.cos(time * 0.4 + d.phase) * 0.1;
+    if (d.x < 0) d.x = W; if (d.x > W) d.x = 0;
+    if (d.y < 0) d.y = H; if (d.y > H) d.y = 0;
+    ctx.beginPath();
+    ctx.arc(d.x, d.y, d.size, 0, Math.PI * 2);
+    ctx.fillStyle = `rgba(180, 200, 255, ${d.alpha * (0.5 + 0.5 * Math.sin(time + d.phase))})`;
+    ctx.fill();
+  });
+
+  // generation labels
+  ctx.font = '11px Courier New';
+  ctx.fillStyle = 'rgba(255,255,255,0.12)';
+  ctx.textAlign = 'center';
+  for (let g = 1; g <= 4; g++) {
+    const gx = 120 + (g - 1) * 280;
+    ctx.fillText(`GEN ${g}`, gx, 28);
+    // vertical guide line
+    ctx.strokeStyle = 'rgba(255,255,255,0.03)';
+    ctx.beginPath(); ctx.moveTo(gx, 40); ctx.lineTo(gx, H - 20); ctx.stroke();
+  }
+
+  // draw edges (lineage connections)
+  edges.forEach(e => {
+    const pulse = 0.4 + 0.3 * Math.sin(time * 2 + e.pulse);
+    const fromC = statusColors[e.from.exp.status] || [150,150,150];
+    const toC = statusColors[e.to.exp.status] || [150,150,150];
+
+    // curved lineage line
+    ctx.beginPath();
+    const cpx = (e.from.x + e.to.x) / 2;
+    const cpy = (e.from.y + e.to.y) / 2 - 30;
+    ctx.moveTo(e.from.x, e.from.y);
+    ctx.quadraticCurveTo(cpx, cpy, e.to.x, e.to.y);
+    ctx.strokeStyle = `rgba(${Math.round((fromC[0]+toC[0])/2)},${Math.round((fromC[1]+toC[1])/2)},${Math.round((fromC[2]+toC[2])/2)},${pulse * 0.5})`;
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+
+    // traveling pulse dot along edge
+    const t = (time * 0.3 + e.pulse) % 1;
+    const px = (1-t)*(1-t)*e.from.x + 2*(1-t)*t*cpx + t*t*e.to.x;
+    const py = (1-t)*(1-t)*e.from.y + 2*(1-t)*t*cpy + t*t*e.to.y;
+    ctx.beginPath();
+    ctx.arc(px, py, 2, 0, Math.PI * 2);
+    ctx.fillStyle = `rgba(255,255,255,${pulse * 0.6})`;
+    ctx.fill();
+  });
+
+  // draw nodes
+  nodes.forEach(n => {
+    const exp = n.exp;
+    const sc = exp.score || 3;
+    const isHovered = hoveredExp === n;
+    const breathe = 1 + 0.06 * Math.sin(time * 1.5 + n.phase);
+    const r = n.baseRadius * breathe * (isHovered ? 1.3 : 1);
+    n.radius = r;
+
+    const col = statusColors[exp.status] || [150, 150, 150];
+
+    // mouse attraction (gentle)
+    const dMouse = Math.hypot(mx - n.x, my - n.y);
+    if (dMouse < 200) {
+      const pull = (200 - dMouse) * 0.0003;
+      n.vx += (mx - n.x) * pull;
+      n.vy += (my - n.y) * pull;
+    }
+
+    // outer glow
+    const glowR = r * (exp.status === 'fertile' ? 3 : 2);
+    const glow = ctx.createRadialGradient(n.x, n.y, r * 0.5, n.x, n.y, glowR);
+    glow.addColorStop(0, `rgba(${col[0]},${col[1]},${col[2]},${isHovered ? 0.25 : 0.12})`);
+    glow.addColorStop(1, 'rgba(10,10,18,0)');
+    ctx.beginPath();
+    ctx.arc(n.x, n.y, glowR, 0, Math.PI * 2);
+    ctx.fillStyle = glow;
+    ctx.fill();
+
+    // main body
+    const grad = ctx.createRadialGradient(n.x - r*0.2, n.y - r*0.2, 0, n.x, n.y, r);
+    const alpha = exp.status === 'declining' ? 0.3 : 0.85;
+    grad.addColorStop(0, `rgba(${Math.min(255,col[0]+60)},${Math.min(255,col[1]+60)},${Math.min(255,col[2]+60)},${alpha})`);
+    grad.addColorStop(0.7, `rgba(${col[0]},${col[1]},${col[2]},${alpha * 0.8})`);
+    grad.addColorStop(1, `rgba(${Math.max(0,col[0]-40)},${Math.max(0,col[1]-40)},${Math.max(0,col[2]-40)},${alpha * 0.5})`);
+    ctx.beginPath();
+    ctx.arc(n.x, n.y, r, 0, Math.PI * 2);
+    ctx.fillStyle = grad;
+    ctx.fill();
+
+    // fertile ring
+    if (exp.status === 'fertile') {
+      ctx.beginPath();
+      ctx.arc(n.x, n.y, r + 3, 0, Math.PI * 2);
+      ctx.strokeStyle = `rgba(${col[0]},${col[1]},${col[2]},${0.3 + 0.2 * Math.sin(time * 3 + n.phase)})`;
+      ctx.lineWidth = 1.5;
+      ctx.stroke();
+    }
+
+    // score text inside node
+    if (exp.score !== null && r > 12) {
+      ctx.font = `${Math.max(8, r * 0.55)}px Courier New`;
+      ctx.fillStyle = `rgba(255,255,255,${exp.status === 'declining' ? 0.3 : 0.8})`;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(exp.score.toFixed(1), n.x, n.y);
+    }
+
+    // ID label below
+    ctx.font = '8px Courier New';
+    ctx.fillStyle = `rgba(255,255,255,${isHovered ? 0.7 : 0.25})`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'top';
+    ctx.fillText(exp.id, n.x, n.y + r + 5);
+    if (isHovered) {
+      ctx.font = '9px Courier New';
+      ctx.fillStyle = 'rgba(255,255,255,0.5)';
+      ctx.fillText(exp.title, n.x, n.y + r + 16);
+    }
+
+    // niche satellite particles
+    n.nicheParticles.forEach(np => {
+      np.angle += 0.008;
+      const d = np.dist + 4 * Math.sin(time * 2 + np.phase);
+      const px = n.x + Math.cos(np.angle) * d;
+      const py = n.y + Math.sin(np.angle) * d;
+      ctx.beginPath();
+      ctx.arc(px, py, 2.5, 0, Math.PI * 2);
+      ctx.fillStyle = nicheColors[np.niche] || '#555';
+      ctx.globalAlpha = 0.5 + 0.2 * Math.sin(time * 3 + np.phase);
+      ctx.fill();
+      ctx.globalAlpha = 1;
+    });
+  });
+
+  // title
+  ctx.font = '14px Courier New';
+  ctx.fillStyle = `rgba(255,255,255,${0.15 + 0.05 * Math.sin(time * 0.5)})`;
+  ctx.textAlign = 'left';
+  ctx.textBaseline = 'top';
+  ctx.fillText('PHYLOGENY — the colony observes itself', 20, H - 30);
+
+  // stats bar
+  const fertile = EXPERIMENTS.filter(e => e.status === 'fertile').length;
+  const alive = EXPERIMENTS.filter(e => e.status === 'alive').length;
+  const declining = EXPERIMENTS.filter(e => e.status === 'declining').length;
+  const scored = EXPERIMENTS.filter(e => e.score !== null);
+  const meanScore = scored.length ? (scored.reduce((a,e) => a + e.score, 0) / scored.length).toFixed(1) : '—';
+  const niches = [...new Set(EXPERIMENTS.flatMap(e => e.niches))].length;
+
+  ctx.font = '9px Courier New';
+  ctx.fillStyle = 'rgba(255,255,255,0.2)';
+  ctx.textAlign = 'right';
+  ctx.fillText(`${EXPERIMENTS.length} experiments · ${fertile} fertile · ${alive} alive · ${declining} declining · ${niches} niches · μ=${meanScore}`, W - 20, H - 16);
+
+  // niche legend
+  const nicheList = Object.keys(nicheColors);
+  ctx.textAlign = 'left';
+  ctx.font = '8px Courier New';
+  nicheList.forEach((n, i) => {
+    const lx = W - 140 + (i % 2) * 70;
+    const ly = 14 + Math.floor(i / 2) * 13;
+    ctx.fillStyle = nicheColors[n];
+    ctx.globalAlpha = 0.4;
+    ctx.beginPath(); ctx.arc(lx - 5, ly, 2.5, 0, Math.PI * 2); ctx.fill();
+    ctx.globalAlpha = 0.3;
+    ctx.fillText(n, lx, ly + 3);
+    ctx.globalAlpha = 1;
+  });
+
+  // status legend
+  ctx.font = '8px Courier New';
+  let ly = 14;
+  Object.entries(statusColors).forEach(([st, col]) => {
+    ctx.fillStyle = `rgb(${col.join(',')})`;
+    ctx.globalAlpha = 0.5;
+    ctx.beginPath(); ctx.arc(24, ly, 4, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = 'rgba(255,255,255,0.3)';
+    ctx.fillText(st, 34, ly + 3);
+    ctx.globalAlpha = 1;
+    ly += 16;
+  });
+
+  requestAnimationFrame(draw);
+}
+
+// ambient dust particles
+const dust = [];
+for (let i = 0; i < 80; i++) {
+  dust.push({
+    x: Math.random() * W,
+    y: Math.random() * H,
+    vx: (Math.random() - 0.5) * 0.3,
+    vy: (Math.random() - 0.5) * 0.3,
+    size: 0.5 + Math.random() * 1.5,
+    alpha: 0.05 + Math.random() * 0.1,
+    phase: Math.random() * Math.PI * 2,
+  });
+}
+
+draw();
+</script>
+</body>
+</html>

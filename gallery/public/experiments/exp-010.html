@@ -1,0 +1,325 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>exp-010 — Phototaxis</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { width: 100%; height: 100%; overflow: hidden; background: #f8f5ef; }
+  canvas { display: block; width: 100%; height: 100%; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<script>
+// Hypothesis: What if photosynthetic organisms drifted across a sunlit cream field —
+// cells with visible chloroplasts, trailing golden light, proving the colony can live in daylight?
+
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d');
+
+let W, H;
+let mouse = { x: -1000, y: -1000 };
+let cells = [];
+const CELL_COUNT = 18;
+
+function resize() {
+  W = canvas.width = window.innerWidth;
+  H = canvas.height = window.innerHeight;
+}
+resize();
+window.addEventListener('resize', resize);
+canvas.addEventListener('mousemove', e => { mouse.x = e.clientX; mouse.y = e.clientY; });
+canvas.addEventListener('mouseleave', () => { mouse.x = -1000; mouse.y = -1000; });
+
+// Soft palette: greens, teals, golden-ambers on cream
+const palettes = [
+  // chloroplast greens
+  { membrane: 'rgba(76, 145, 65, 0.35)', nucleus: 'rgba(45, 110, 40, 0.6)', organelle: 'rgba(120, 180, 60, 0.5)', glow: 'rgba(180, 210, 80, 0.15)' },
+  // golden-amber
+  { membrane: 'rgba(200, 160, 60, 0.3)', nucleus: 'rgba(180, 130, 30, 0.55)', organelle: 'rgba(220, 190, 80, 0.5)', glow: 'rgba(240, 220, 120, 0.12)' },
+  // teal-cyan
+  { membrane: 'rgba(50, 150, 140, 0.3)', nucleus: 'rgba(30, 120, 115, 0.5)', organelle: 'rgba(80, 190, 170, 0.45)', glow: 'rgba(130, 220, 200, 0.12)' },
+  // warm rose (rare)
+  { membrane: 'rgba(190, 100, 90, 0.25)', nucleus: 'rgba(160, 70, 65, 0.45)', organelle: 'rgba(210, 140, 120, 0.4)', glow: 'rgba(230, 180, 160, 0.1)' },
+];
+
+class Cell {
+  constructor() {
+    this.x = Math.random() * W;
+    this.y = Math.random() * H;
+    this.r = 25 + Math.random() * 40;
+    this.vx = (Math.random() - 0.5) * 0.4;
+    this.vy = (Math.random() - 0.5) * 0.4;
+    this.phase = Math.random() * Math.PI * 2;
+    this.breathRate = 0.005 + Math.random() * 0.008;
+    this.rotation = Math.random() * Math.PI * 2;
+    this.rotSpeed = (Math.random() - 0.5) * 0.003;
+    this.palette = palettes[Math.floor(Math.random() * palettes.length)];
+    this.wobbleAmp = 0.06 + Math.random() * 0.06;
+    this.chloroplasts = [];
+    const numC = 3 + Math.floor(Math.random() * 5);
+    for (let i = 0; i < numC; i++) {
+      const angle = Math.random() * Math.PI * 2;
+      const dist = 0.3 + Math.random() * 0.45;
+      this.chloroplasts.push({
+        angle, dist,
+        size: 0.12 + Math.random() * 0.1,
+        orbitSpeed: (Math.random() - 0.5) * 0.008,
+        phase: Math.random() * Math.PI * 2
+      });
+    }
+    // trailing particles
+    this.trail = [];
+  }
+
+  update(t) {
+    // gentle drift
+    this.vx += (Math.random() - 0.5) * 0.02;
+    this.vy += (Math.random() - 0.5) * 0.02;
+
+    // phototaxis: drift toward mouse (sun)
+    const dx = mouse.x - this.x;
+    const dy = mouse.y - this.y;
+    const dist = Math.sqrt(dx * dx + dy * dy);
+    if (dist < 400 && dist > 1) {
+      const force = 0.15 / (dist * 0.01 + 1);
+      this.vx += (dx / dist) * force;
+      this.vy += (dy / dist) * force;
+    }
+
+    // damping
+    this.vx *= 0.985;
+    this.vy *= 0.985;
+
+    this.x += this.vx;
+    this.y += this.vy;
+
+    // wrap
+    if (this.x < -this.r * 2) this.x = W + this.r;
+    if (this.x > W + this.r * 2) this.x = -this.r;
+    if (this.y < -this.r * 2) this.y = H + this.r;
+    if (this.y > H + this.r * 2) this.y = -this.r;
+
+    this.phase += this.breathRate;
+    this.rotation += this.rotSpeed;
+
+    // update chloroplast orbits
+    for (const c of this.chloroplasts) {
+      c.angle += c.orbitSpeed;
+      c.phase += 0.02;
+    }
+
+    // trail
+    if (Math.abs(this.vx) + Math.abs(this.vy) > 0.3) {
+      this.trail.push({ x: this.x, y: this.y, age: 0, maxAge: 60 + Math.random() * 40 });
+    }
+    for (let i = this.trail.length - 1; i >= 0; i--) {
+      this.trail[i].age++;
+      if (this.trail[i].age > this.trail[i].maxAge) this.trail.splice(i, 1);
+    }
+  }
+
+  draw(t) {
+    const breathScale = 1 + Math.sin(this.phase) * this.wobbleAmp;
+    const r = this.r * breathScale;
+
+    ctx.save();
+    ctx.translate(this.x, this.y);
+    ctx.rotate(this.rotation);
+
+    // soft shadow on the cream background
+    ctx.shadowColor = 'rgba(0,0,0,0.06)';
+    ctx.shadowBlur = r * 0.6;
+    ctx.shadowOffsetX = r * 0.1;
+    ctx.shadowOffsetY = r * 0.15;
+
+    // outer glow
+    const glowGrad = ctx.createRadialGradient(0, 0, r * 0.5, 0, 0, r * 1.8);
+    glowGrad.addColorStop(0, this.palette.glow);
+    glowGrad.addColorStop(1, 'rgba(255,255,255,0)');
+    ctx.fillStyle = glowGrad;
+    ctx.beginPath();
+    ctx.arc(0, 0, r * 1.8, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.shadowColor = 'transparent';
+
+    // membrane — wobbly organic shape
+    ctx.beginPath();
+    const points = 60;
+    for (let i = 0; i <= points; i++) {
+      const a = (i / points) * Math.PI * 2;
+      const wobble = 1 + Math.sin(a * 3 + this.phase * 2) * 0.04
+                       + Math.sin(a * 5 - this.phase * 1.5) * 0.03
+                       + Math.sin(a * 7 + t * 0.001) * 0.02;
+      const px = Math.cos(a) * r * wobble;
+      const py = Math.sin(a) * r * wobble;
+      if (i === 0) ctx.moveTo(px, py);
+      else ctx.lineTo(px, py);
+    }
+    ctx.closePath();
+
+    // membrane fill: soft translucent gradient
+    const memGrad = ctx.createRadialGradient(r * 0.15, -r * 0.15, r * 0.1, 0, 0, r);
+    memGrad.addColorStop(0, 'rgba(255,255,255,0.5)');
+    memGrad.addColorStop(0.3, this.palette.membrane);
+    memGrad.addColorStop(1, this.palette.nucleus);
+    ctx.fillStyle = memGrad;
+    ctx.fill();
+
+    // membrane edge
+    ctx.strokeStyle = this.palette.nucleus.replace(/[\d.]+\)$/, '0.4)');
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+
+    // specular highlight
+    ctx.beginPath();
+    ctx.ellipse(-r * 0.2, -r * 0.25, r * 0.35, r * 0.18, -0.4, 0, Math.PI * 2);
+    const specGrad = ctx.createRadialGradient(-r * 0.2, -r * 0.25, 0, -r * 0.2, -r * 0.25, r * 0.35);
+    specGrad.addColorStop(0, 'rgba(255,255,255,0.55)');
+    specGrad.addColorStop(1, 'rgba(255,255,255,0)');
+    ctx.fillStyle = specGrad;
+    ctx.fill();
+
+    // chloroplasts — small elliptical organelles orbiting inside
+    for (const c of this.chloroplasts) {
+      const cx = Math.cos(c.angle) * r * c.dist;
+      const cy = Math.sin(c.angle) * r * c.dist;
+      const cs = r * c.size * (1 + Math.sin(c.phase) * 0.15);
+      ctx.save();
+      ctx.translate(cx, cy);
+      ctx.rotate(c.angle + Math.PI * 0.5);
+      ctx.beginPath();
+      ctx.ellipse(0, 0, cs, cs * 0.55, 0, 0, Math.PI * 2);
+      ctx.fillStyle = this.palette.organelle;
+      ctx.fill();
+      ctx.strokeStyle = this.palette.nucleus.replace(/[\d.]+\)$/, '0.25)');
+      ctx.lineWidth = 0.7;
+      ctx.stroke();
+      // thylakoid lines inside chloroplast
+      ctx.strokeStyle = this.palette.nucleus.replace(/[\d.]+\)$/, '0.2)');
+      ctx.lineWidth = 0.5;
+      for (let l = -2; l <= 2; l++) {
+        ctx.beginPath();
+        ctx.moveTo(-cs * 0.6, l * cs * 0.15);
+        ctx.quadraticCurveTo(0, l * cs * 0.15 + cs * 0.08 * Math.sin(c.phase + l), cs * 0.6, l * cs * 0.15);
+        ctx.stroke();
+      }
+      ctx.restore();
+    }
+
+    // nucleus
+    const nSize = r * 0.22 * (1 + Math.sin(this.phase * 0.7) * 0.08);
+    const nucGrad = ctx.createRadialGradient(0, 0, 0, 0, 0, nSize);
+    nucGrad.addColorStop(0, this.palette.organelle);
+    nucGrad.addColorStop(0.6, this.palette.nucleus);
+    nucGrad.addColorStop(1, this.palette.nucleus.replace(/[\d.]+\)$/, '0.2)'));
+    ctx.beginPath();
+    ctx.arc(0, 0, nSize, 0, Math.PI * 2);
+    ctx.fillStyle = nucGrad;
+    ctx.fill();
+
+    ctx.restore();
+
+    // draw trail as fading golden dots
+    for (const p of this.trail) {
+      const alpha = (1 - p.age / p.maxAge) * 0.2;
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, 2 + (1 - p.age / p.maxAge) * 3, 0, Math.PI * 2);
+      ctx.fillStyle = `rgba(210, 190, 100, ${alpha})`;
+      ctx.fill();
+    }
+  }
+}
+
+// floating pollen / dust motes in the sunlight
+const motes = [];
+for (let i = 0; i < 50; i++) {
+  motes.push({
+    x: Math.random() * W,
+    y: Math.random() * H,
+    size: 1 + Math.random() * 2.5,
+    speed: 0.1 + Math.random() * 0.3,
+    drift: (Math.random() - 0.5) * 0.2,
+    phase: Math.random() * Math.PI * 2,
+    alpha: 0.1 + Math.random() * 0.2
+  });
+}
+
+// init cells
+for (let i = 0; i < CELL_COUNT; i++) {
+  cells.push(new Cell());
+}
+
+// sunbeam rays
+function drawSunbeams(t) {
+  const cx = W * 0.8;
+  const cy = -H * 0.1;
+  const numRays = 8;
+  ctx.save();
+  ctx.globalCompositeOperation = 'multiply';
+  for (let i = 0; i < numRays; i++) {
+    const angle = (i / numRays) * Math.PI * 0.6 + Math.PI * 0.55 + Math.sin(t * 0.0003 + i) * 0.03;
+    const len = Math.max(W, H) * 1.5;
+    const spread = 0.04 + Math.sin(t * 0.0005 + i * 2) * 0.015;
+    ctx.beginPath();
+    ctx.moveTo(cx, cy);
+    ctx.lineTo(cx + Math.cos(angle - spread) * len, cy + Math.sin(angle - spread) * len);
+    ctx.lineTo(cx + Math.cos(angle + spread) * len, cy + Math.sin(angle + spread) * len);
+    ctx.closePath();
+    const alpha = 0.03 + Math.sin(t * 0.001 + i * 1.5) * 0.015;
+    ctx.fillStyle = `rgba(255, 240, 180, ${alpha})`;
+    ctx.fill();
+  }
+  ctx.restore();
+}
+
+function drawMotes(t) {
+  for (const m of motes) {
+    m.y -= m.speed;
+    m.x += m.drift + Math.sin(t * 0.001 + m.phase) * 0.15;
+    if (m.y < -10) { m.y = H + 10; m.x = Math.random() * W; }
+    if (m.x < -10) m.x = W + 10;
+    if (m.x > W + 10) m.x = -10;
+
+    const flicker = 0.7 + Math.sin(t * 0.003 + m.phase) * 0.3;
+    ctx.beginPath();
+    ctx.arc(m.x, m.y, m.size * flicker, 0, Math.PI * 2);
+    ctx.fillStyle = `rgba(220, 200, 140, ${m.alpha * flicker})`;
+    ctx.fill();
+  }
+}
+
+function frame(t) {
+  // warm cream background
+  ctx.fillStyle = '#f8f5ef';
+  ctx.fillRect(0, 0, W, H);
+
+  // subtle warm gradient overlay
+  const bgGrad = ctx.createRadialGradient(W * 0.7, H * 0.2, 0, W * 0.5, H * 0.5, Math.max(W, H) * 0.8);
+  bgGrad.addColorStop(0, 'rgba(255, 248, 220, 0.4)');
+  bgGrad.addColorStop(0.5, 'rgba(255, 250, 235, 0.1)');
+  bgGrad.addColorStop(1, 'rgba(245, 240, 230, 0)');
+  ctx.fillStyle = bgGrad;
+  ctx.fillRect(0, 0, W, H);
+
+  drawSunbeams(t);
+  drawMotes(t);
+
+  // sort cells by size for depth
+  cells.sort((a, b) => a.r - b.r);
+
+  for (const cell of cells) {
+    cell.update(t);
+    cell.draw(t);
+  }
+
+  requestAnimationFrame(frame);
+}
+
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>

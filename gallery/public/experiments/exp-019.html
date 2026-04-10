@@ -1,0 +1,307 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>exp-019 — Abyssal Bloom</title>
+<style>
+  *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    width: 100vw;
+    height: 100vh;
+    overflow: hidden;
+    background: #030012;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  svg {
+    width: 100vw;
+    height: 100vh;
+  }
+</style>
+</head>
+<body>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 720" id="stage">
+  <defs>
+    <!-- Turbulence for organic distortion -->
+    <filter id="warp" x="-50%" y="-50%" width="200%" height="200%">
+      <feTurbulence id="turb" type="fractalNoise" baseFrequency="0.012 0.018" numOctaves="4" seed="7" result="noise"/>
+      <feDisplacementMap in="SourceGraphic" in2="noise" scale="35" xChannelSelector="R" yChannelSelector="G"/>
+    </filter>
+
+    <!-- Glow filter -->
+    <filter id="glow" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur stdDeviation="8" result="blur"/>
+      <feComposite in="SourceGraphic" in2="blur" operator="over"/>
+    </filter>
+
+    <!-- Deep glow for background elements -->
+    <filter id="deepglow" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur stdDeviation="20" result="blur"/>
+      <feColorMatrix type="saturate" values="2.5" in="blur" result="sat"/>
+      <feComposite in="SourceGraphic" in2="sat" operator="over"/>
+    </filter>
+
+    <!-- Morphing distortion -->
+    <filter id="morph" x="-50%" y="-50%" width="200%" height="200%">
+      <feTurbulence id="morphTurb" type="turbulence" baseFrequency="0.02 0.025" numOctaves="3" seed="42" result="mnoise"/>
+      <feDisplacementMap in="SourceGraphic" in2="mnoise" scale="20" xChannelSelector="R" yChannelSelector="B"/>
+      <feGaussianBlur stdDeviation="1.5"/>
+    </filter>
+
+    <!-- Radial gradients for bloom petals -->
+    <radialGradient id="petalGrad1" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#ff2d95" stop-opacity="1"/>
+      <stop offset="40%" stop-color="#ff0066" stop-opacity="0.7"/>
+      <stop offset="100%" stop-color="#4400aa" stop-opacity="0"/>
+    </radialGradient>
+
+    <radialGradient id="petalGrad2" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#00ffcc" stop-opacity="1"/>
+      <stop offset="40%" stop-color="#00cc88" stop-opacity="0.7"/>
+      <stop offset="100%" stop-color="#003366" stop-opacity="0"/>
+    </radialGradient>
+
+    <radialGradient id="petalGrad3" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#ffaa00" stop-opacity="1"/>
+      <stop offset="40%" stop-color="#ff6600" stop-opacity="0.7"/>
+      <stop offset="100%" stop-color="#440033" stop-opacity="0"/>
+    </radialGradient>
+
+    <radialGradient id="coreGrad" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#ffffff" stop-opacity="1"/>
+      <stop offset="15%" stop-color="#ffccee" stop-opacity="1"/>
+      <stop offset="35%" stop-color="#ff44aa" stop-opacity="0.9"/>
+      <stop offset="60%" stop-color="#cc00ff" stop-opacity="0.6"/>
+      <stop offset="100%" stop-color="#220044" stop-opacity="0"/>
+    </radialGradient>
+
+    <radialGradient id="sporeGrad" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#ccffff" stop-opacity="1"/>
+      <stop offset="50%" stop-color="#44ddff" stop-opacity="0.7"/>
+      <stop offset="100%" stop-color="#0044ff" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+
+  <!-- Background nebula layer -->
+  <g id="nebula" filter="url(#deepglow)" opacity="0.65">
+  </g>
+
+  <!-- Main bloom organism -->
+  <g id="bloom" transform="translate(640, 360)" filter="url(#warp)">
+    <!-- Outer petal rings -->
+    <g id="outerPetals" opacity="0.7">
+    </g>
+    <!-- Inner petal rings -->
+    <g id="innerPetals" opacity="0.85">
+    </g>
+    <!-- Core -->
+    <circle cx="0" cy="0" r="55" fill="url(#coreGrad)" filter="url(#glow)"/>
+  </g>
+
+  <!-- Floating spores -->
+  <g id="spores">
+  </g>
+
+  <!-- Tendrils -->
+  <g id="tendrils" filter="url(#morph)" opacity="0.8">
+  </g>
+</svg>
+
+<script>
+const SVG_NS = "http://www.w3.org/2000/svg";
+const stage = document.getElementById("stage");
+const nebulaG = document.getElementById("nebula");
+const outerPetalsG = document.getElementById("outerPetals");
+const innerPetalsG = document.getElementById("innerPetals");
+const sporesG = document.getElementById("spores");
+const tendrilsG = document.getElementById("tendrils");
+const turb = document.getElementById("turb");
+const morphTurb = document.getElementById("morphTurb");
+
+let mouseX = 640, mouseY = 360;
+let time = 0;
+
+// Create nebula blobs
+const nebulaColors = ["#ff006670", "#6600ff60", "#00ffaa50", "#ff440060", "#0066ff55"];
+for (let i = 0; i < 8; i++) {
+  const blob = document.createElementNS(SVG_NS, "ellipse");
+  const angle = (i / 8) * Math.PI * 2;
+  blob.setAttribute("cx", 640 + Math.cos(angle) * 280);
+  blob.setAttribute("cy", 360 + Math.sin(angle) * 180);
+  blob.setAttribute("rx", 120 + Math.random() * 80);
+  blob.setAttribute("ry", 80 + Math.random() * 60);
+  blob.setAttribute("fill", nebulaColors[i % nebulaColors.length]);
+  nebulaG.appendChild(blob);
+}
+
+// Create outer petals - large sweeping arcs
+const OUTER_COUNT = 12;
+const outerPetals = [];
+for (let i = 0; i < OUTER_COUNT; i++) {
+  const petal = document.createElementNS(SVG_NS, "ellipse");
+  const gradId = ["petalGrad1", "petalGrad2", "petalGrad3"][i % 3];
+  petal.setAttribute("fill", `url(#${gradId})`);
+  petal.setAttribute("rx", 120);
+  petal.setAttribute("ry", 30);
+  outerPetalsG.appendChild(petal);
+  outerPetals.push({ el: petal, baseAngle: (i / OUTER_COUNT) * Math.PI * 2, dist: 110 });
+}
+
+// Create inner petals - tighter, brighter
+const INNER_COUNT = 8;
+const innerPetals = [];
+for (let i = 0; i < INNER_COUNT; i++) {
+  const petal = document.createElementNS(SVG_NS, "ellipse");
+  const gradId = ["petalGrad1", "petalGrad2", "petalGrad3"][(i + 1) % 3];
+  petal.setAttribute("fill", `url(#${gradId})`);
+  petal.setAttribute("rx", 70);
+  petal.setAttribute("ry", 18);
+  innerPetalsG.appendChild(petal);
+  innerPetals.push({ el: petal, baseAngle: (i / INNER_COUNT) * Math.PI * 2 + 0.3, dist: 55 });
+}
+
+// Create spores - small floating particles
+const SPORE_COUNT = 60;
+const spores = [];
+for (let i = 0; i < SPORE_COUNT; i++) {
+  const spore = document.createElementNS(SVG_NS, "circle");
+  const r = 2 + Math.random() * 4;
+  spore.setAttribute("r", r);
+  spore.setAttribute("fill", `url(#sporeGrad)`);
+  spore.setAttribute("filter", "url(#glow)");
+  sporesG.appendChild(spore);
+  spores.push({
+    el: spore,
+    angle: Math.random() * Math.PI * 2,
+    radius: 160 + Math.random() * 350,
+    speed: 0.002 + Math.random() * 0.006,
+    drift: Math.random() * 0.5,
+    phase: Math.random() * Math.PI * 2,
+    size: r
+  });
+}
+
+// Create tendrils - organic curves radiating outward
+const TENDRIL_COUNT = 6;
+const tendrils = [];
+for (let i = 0; i < TENDRIL_COUNT; i++) {
+  const path = document.createElementNS(SVG_NS, "path");
+  path.setAttribute("fill", "none");
+  path.setAttribute("stroke-width", "3.5");
+  path.setAttribute("stroke-linecap", "round");
+  const hue = (i / TENDRIL_COUNT) * 360;
+  path.setAttribute("stroke", `hsla(${hue}, 100%, 70%, 0.7)`);
+  tendrilsG.appendChild(path);
+  tendrils.push({ el: path, baseAngle: (i / TENDRIL_COUNT) * Math.PI * 2, segments: 8 });
+}
+
+// Mouse tracking
+document.addEventListener("mousemove", (e) => {
+  const rect = stage.getBoundingClientRect();
+  mouseX = ((e.clientX - rect.left) / rect.width) * 1280;
+  mouseY = ((e.clientY - rect.top) / rect.height) * 720;
+});
+
+// Breathing animation
+function animate() {
+  time += 0.016;
+
+  // Animate turbulence
+  const bfX = 0.012 + Math.sin(time * 0.3) * 0.005;
+  const bfY = 0.018 + Math.cos(time * 0.25) * 0.006;
+  turb.setAttribute("baseFrequency", `${bfX} ${bfY}`);
+
+  const mbfX = 0.02 + Math.sin(time * 0.5) * 0.008;
+  const mbfY = 0.025 + Math.cos(time * 0.4) * 0.007;
+  morphTurb.setAttribute("baseFrequency", `${mbfX} ${mbfY}`);
+
+  // Mouse influence
+  const mx = (mouseX - 640) / 640;
+  const my = (mouseY - 360) / 360;
+  const breathe = 1 + Math.sin(time * 0.8) * 0.15;
+
+  // Outer petals - rotate slowly, pulse
+  outerPetals.forEach((p, i) => {
+    const angle = p.baseAngle + time * 0.15 + Math.sin(time * 0.3 + i) * 0.2;
+    const dist = p.dist * breathe + mx * 15;
+    const cx = Math.cos(angle) * dist;
+    const cy = Math.sin(angle) * dist;
+    const rx = (120 + Math.sin(time * 0.5 + i * 0.7) * 25) * breathe;
+    const ry = 30 + Math.sin(time * 0.7 + i) * 8;
+    const rot = (angle * 180 / Math.PI) + 90;
+    p.el.setAttribute("cx", cx);
+    p.el.setAttribute("cy", cy);
+    p.el.setAttribute("rx", rx);
+    p.el.setAttribute("ry", ry);
+    p.el.setAttribute("transform", `rotate(${rot} ${cx} ${cy})`);
+  });
+
+  // Inner petals - counter-rotate, different rhythm
+  innerPetals.forEach((p, i) => {
+    const angle = p.baseAngle - time * 0.25 + Math.cos(time * 0.4 + i * 1.2) * 0.3;
+    const dist = p.dist * breathe + my * 10;
+    const cx = Math.cos(angle) * dist;
+    const cy = Math.sin(angle) * dist;
+    const rx = (70 + Math.sin(time * 0.6 + i * 0.9) * 15) * breathe;
+    const ry = 18 + Math.cos(time * 0.8 + i) * 5;
+    const rot = (angle * 180 / Math.PI) + 90;
+    p.el.setAttribute("cx", cx);
+    p.el.setAttribute("cy", cy);
+    p.el.setAttribute("rx", rx);
+    p.el.setAttribute("ry", ry);
+    p.el.setAttribute("transform", `rotate(${rot} ${cx} ${cy})`);
+  });
+
+  // Spores - orbit and drift
+  spores.forEach((s) => {
+    s.angle += s.speed;
+    const wobble = Math.sin(time * 1.5 + s.phase) * s.drift * 30;
+    const r = s.radius + wobble + Math.sin(time * 0.3) * 20;
+    const x = 640 + Math.cos(s.angle) * r + mx * 30;
+    const y = 360 + Math.sin(s.angle) * r * 0.65 + my * 20;
+    const pulse = s.size * (1 + Math.sin(time * 2 + s.phase) * 0.4);
+    s.el.setAttribute("cx", x);
+    s.el.setAttribute("cy", y);
+    s.el.setAttribute("r", pulse);
+    s.el.setAttribute("opacity", 0.4 + Math.sin(time + s.phase) * 0.3);
+  });
+
+  // Tendrils - organic curves
+  tendrils.forEach((t, i) => {
+    const baseA = t.baseAngle + time * 0.1;
+    let d = `M 640 360`;
+    let curX = 640, curY = 360;
+    for (let s = 1; s <= t.segments; s++) {
+      const segLen = 40 + s * 12;
+      const angle = baseA + Math.sin(time * 0.4 + s * 0.8 + i) * 0.5 + s * 0.15;
+      const cpAngle = angle + Math.cos(time * 0.6 + s) * 0.7;
+      const cpx = curX + Math.cos(cpAngle) * segLen * 0.6;
+      const cpy = curY + Math.sin(cpAngle) * segLen * 0.6;
+      curX = curX + Math.cos(angle) * segLen;
+      curY = curY + Math.sin(angle) * segLen;
+      d += ` Q ${cpx} ${cpy} ${curX} ${curY}`;
+    }
+    t.el.setAttribute("d", d);
+    const hue = ((i / TENDRIL_COUNT) * 360 + time * 20) % 360;
+    t.el.setAttribute("stroke", `hsla(${hue}, 100%, 65%, 0.5)`);
+  });
+
+  // Nebula pulse
+  const nebulaEls = nebulaG.children;
+  for (let i = 0; i < nebulaEls.length; i++) {
+    const el = nebulaEls[i];
+    const baseRx = 120 + (i % 3) * 30;
+    const baseRy = 80 + (i % 4) * 20;
+    el.setAttribute("rx", baseRx + Math.sin(time * 0.2 + i) * 30);
+    el.setAttribute("ry", baseRy + Math.cos(time * 0.15 + i * 0.7) * 20);
+  }
+
+  requestAnimationFrame(animate);
+}
+
+animate();
+</script>
+</body>
+</html>

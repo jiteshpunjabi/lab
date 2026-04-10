@@ -1,0 +1,85 @@
+
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Chaotic Particle Flow</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.9.0/p5.min.js"></script>
+    <style>
+        body { margin: 0; overflow: hidden; background-color: #000000; }
+    </style>
+</head>
+<body>
+    <script>
+        let particles = [];
+        const numParticles = 150;
+        const trailLength = 5;
+
+        // Particle Class
+        class Particle {
+            constructor(x, y) {
+                this.pos = createVector(x, y);
+                this.vel = p5.Vector.random2D().mult(random(1, 3));
+                this.acc = createVector(0, 0);
+                this.history = [];
+                this.maxHistory = trailLength;
+                this.colorHue = random(360);
+            }
+
+            applyForce(force) {
+                this.acc.add(force);
+            }
+
+            update(mouse) {
+                this.applyForce(p5.Vector.sub(createVector(mouse.x, mouse.y), this.pos).div(1000));
+                this.vel.add(this.acc);
+                this.vel.limit(6);
+                this.pos.add(this.vel);
+                this.acc.mult(0); // Reset acceleration
+                
+                // Update history for trailing effect
+                this.history.push(this.pos.copy());
+                if (this.history.length > this.maxHistory) {
+                    this.history.shift();
+                }
+            }
+
+            display(p) {
+                // Draw the trail
+                p.noStroke();
+                p.fill(this.colorHue, 200, 255, 150);
+                for (let i = 0; i < this.history.length; i++) {
+                    let alpha = (i / this.history.length) * 255 * 0.5;
+                    p.fill(this.colorHue, 200, 255, alpha);
+                    p.ellipse(this.history[i].x, this.history[i].y, 3, 3);
+                }
+                
+                // Draw the head
+                p.fill(this.colorHue, 255, 255, 220);
+                p.ellipse(this.pos.x, this.pos.y, 5, 5);
+            }
+        }
+
+        function setup() {
+            createCanvas(1280, 720);
+            background(0);
+            particles = [];
+            for (let i = 0; i < numParticles; i++) {
+                particles.push(new Particle(random(width), random(height)));
+            }
+        }
+
+        function draw() {
+            // Fade the background slightly instead of clearing completely for a ghosting effect
+            background(0, 0, 0, 50); 
+
+            let mouse = createVector(mouseX, mouseY);
+            
+            for (let i = 0; i < particles.length; i++) {
+                let p = particles[i];
+                p.update(mouse);
+                p.display(p5);
+            }
+        }
+    </script>
+</body>
+</html>

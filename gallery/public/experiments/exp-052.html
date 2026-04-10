@@ -1,0 +1,359 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=1280,height=720">
+<title>exp-052: Tectonic Scripture</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{width:1280px;height:720px;overflow:hidden;background:#1a1410}
+canvas{display:block}
+</style>
+</head>
+<body>
+<canvas id="c" width="1280" height="720"></canvas>
+<script>
+// TECTONIC SCRIPTURE
+// Cross-domain collision: seismology meets calligraphy.
+// Text lives on invisible tectonic plates that drift apart.
+// Fault lines glow with magma. Click = earthquake.
+// Text shatters along faults, heals imperfectly. Ghost text rises from the deep.
+
+const C = document.getElementById('c');
+const X = C.getContext('2d');
+const W = 1280, H = 720;
+
+// Tectonic plates via Voronoi seeds
+const NUM_P = 7;
+const seeds = Array.from({length: NUM_P}, (_, i) => ({
+  x: 120 + (i % 3) * 380 + (Math.random() - 0.5) * 200,
+  y: 100 + Math.floor(i / 3) * 250 + (Math.random() - 0.5) * 150,
+  vx: (Math.random() - 0.5) * 0.12,
+  vy: (Math.random() - 0.5) * 0.08,
+  dx: 0, dy: 0,
+}));
+
+// Low-res plate map
+const GS = 10, GW = Math.ceil(W/GS), GH = Math.ceil(H/GS);
+const pMap = new Int8Array(GW * GH);
+
+function buildMap() {
+  for (let gy = 0; gy < GH; gy++) for (let gx = 0; gx < GW; gx++) {
+    const px = gx * GS + GS/2, py = gy * GS + GS/2;
+    let best = 0, bd = 1e9;
+    for (let i = 0; i < NUM_P; i++) {
+      const s = seeds[i];
+      const d = (px-s.x-s.dx)**2 + (py-s.y-s.dy)**2;
+      if (d < bd) { bd = d; best = i; }
+    }
+    pMap[gy * GW + gx] = best;
+  }
+}
+
+function getPlate(px, py) {
+  const gx = Math.floor(px/GS), gy = Math.floor(py/GS);
+  if (gx<0||gx>=GW||gy<0||gy>=GH) return 0;
+  return pMap[gy*GW+gx];
+}
+
+function isFault(px, py) {
+  const p0 = getPlate(px, py);
+  return getPlate(px+GS,py)!==p0 || getPlate(px-GS,py)!==p0 ||
+         getPlate(px,py+GS)!==p0 || getPlate(px,py-GS)!==p0;
+}
+
+// Surface text
+const LINES = [
+  "The continents of meaning drift apart so slowly",
+  "that no single reader notices the widening gulf",
+  "between what was written and what is understood.",
+  "Every sentence is a tectonic plate: solid,",
+  "seemingly permanent, riding on molten thought.",
+  "The fault lines run through the spaces between words",
+  "where ambiguity pools like magma beneath the crust.",
+  "When the pressure builds past bearing, the text quakes",
+  "and letters tumble into the widening rift,",
+  "glowing briefly as they touch the heat below.",
+  "What rises from the crack is older text:",
+  "the first draft, the deleted paragraph,",
+  "the thought before the word. Below every",
+  "polished surface lies rough stone, and below that,",
+  "the deepest layer is silence, and it is on fire.",
+];
+
+// Deep/ghost text
+const DEEP = [
+  "BEFORE LANGUAGE THERE WAS PRESSURE",
+  "BEFORE MEANING THERE WAS HEAT",
+  "THE FIRST WORD WAS AN ERUPTION",
+  "GRAMMAR IS COOLED MAGMA",
+  "ETYMOLOGY IS STRATIGRAPHY",
+  "EVERY METAPHOR IS A FOSSIL",
+  "PUNCTUATION MARKS THE FAULTS",
+  "SILENCE CONDUCTS HEAT UPWARD",
+  "THE OLDEST STORIES ARE VOLCANIC",
+  "WHAT BURNS CANNOT BE UNREAD",
+  "THE CORE IS STILL MOLTEN",
+  "LANGUAGE COOLS FROM THE EDGES IN",
+  "THE CENTER HAS NEVER BEEN STILL",
+  "EVERY DICTIONARY IS A SURVEY",
+  "THE UNSAYABLE IS TECTONIC",
+];
+
+// Build character particles
+const chars = [];
+const FS = 19, LH = 38, MX = 80, MY = 55;
+X.font = FS + 'px Georgia,serif';
+
+for (let i = 0; i < LINES.length; i++) {
+  let xo = 0;
+  for (let j = 0; j < LINES[i].length; j++) {
+    const ch = LINES[i][j];
+    const cw = X.measureText(ch).width;
+    chars.push({
+      ch, hx: MX+xo, hy: MY+i*LH,
+      x: MX+xo, y: MY+i*LH,
+      vx:0, vy:0, plate:-1,
+      rot:0, rv:0,
+      heat:0, dmg:0,
+      sdx:0, sdy:0, // scar drift
+    });
+    xo += cw;
+  }
+}
+
+// Deep text chars
+X.font = 'bold 14px monospace';
+const dChars = [];
+for (let i = 0; i < DEEP.length; i++) {
+  let xo = 0;
+  for (let j = 0; j < DEEP[i].length; j++) {
+    const ch = DEEP[i][j];
+    const cw = X.measureText(ch).width;
+    dChars.push({ ch, x: MX+25+xo, y: MY+8+i*LH, reveal:0 });
+    xo += cw;
+  }
+}
+
+let mouse = {x:-999,y:-999,down:false};
+let qForce = 0, totQ = 0, frame = 0, idle = 0;
+const magma = []; // glowing particles in rifts
+
+C.addEventListener('mousedown', e => { mouse.down=true; mouse.x=e.offsetX; mouse.y=e.offsetY; });
+C.addEventListener('mouseup', () => { mouse.down=false; });
+C.addEventListener('mousemove', e => { mouse.x=e.offsetX; mouse.y=e.offsetY; });
+C.addEventListener('mouseleave', () => { mouse.down=false; });
+
+function assignPlates() {
+  buildMap();
+  for (const c of chars) c.plate = getPlate(c.x, c.y);
+}
+assignPlates();
+
+// Auto-interaction for screenshots
+let autoP = 0;
+function autoQuake() {
+  // Gentler quakes: short bursts so text is readable with visible damage
+  if (autoP===0 && frame===30) { mouse.x=W*0.4; mouse.y=H*0.38; mouse.down=true; autoP=1; }
+  if (autoP===1 && frame===48) { mouse.down=false; autoP=2; }
+  if (autoP===2 && frame===70) { mouse.x=W*0.6; mouse.y=H*0.58; mouse.down=true; autoP=3; }
+  if (autoP===3 && frame===85) { mouse.down=false; autoP=4; }
+  // Let text heal partially before screenshot
+  if (autoP===4 && frame===110) { mouse.x=-999; mouse.y=-999; autoP=6; }
+}
+
+function tick() {
+  frame++;
+  autoQuake();
+
+  // Drift plates
+  for (const s of seeds) {
+    s.dx += s.vx; s.dy += s.vy;
+    if (Math.abs(s.dx)>45) s.vx*=-0.8;
+    if (Math.abs(s.dy)>35) s.vy*=-0.8;
+  }
+  if (frame%12===0) assignPlates();
+
+  // Quake
+  if (mouse.down) { idle=0; qForce=Math.min(qForce+0.25, 6); totQ++; }
+  else { idle++; qForce*=0.92; }
+
+  // Update chars
+  for (const c of chars) {
+    c.heat = isFault(c.x,c.y) ? Math.min(c.heat+0.04,1) : Math.max(c.heat-0.006,0);
+
+    // Plate drift + healing
+    if (c.plate>=0 && c.plate<NUM_P) {
+      const s = seeds[c.plate];
+      if (idle>35) {
+        const h = Math.min((idle-35)/250,1)*0.035;
+        c.vx += (c.hx+s.dx+c.sdx - c.x)*h;
+        c.vy += (c.hy+s.dy+c.sdy - c.y)*h;
+        c.rv += (-c.rot)*h*0.5;
+      }
+    }
+
+    // Quake force
+    if (qForce>0.5) {
+      const dx=c.x-mouse.x, dy=c.y-mouse.y;
+      const dist=Math.sqrt(dx*dx+dy*dy);
+      const R=190+qForce*22;
+      if (dist<R && dist>0) {
+        const intensity=(1-dist/R)*qForce;
+        const fm = c.heat>0.3 ? 2.8 : 1;
+        const f = intensity*fm*0.7;
+        const a = Math.atan2(dy,dx);
+        c.vx += Math.cos(a)*f + (Math.random()-0.5)*f*0.5;
+        c.vy += Math.sin(a)*f + (Math.random()-0.5)*f*0.5;
+        c.rv += (Math.random()-0.5)*intensity*0.12;
+        c.dmg = Math.min(c.dmg+intensity*0.008, 1);
+        c.sdx += (Math.random()-0.5)*intensity*0.15;
+        c.sdy += (Math.random()-0.5)*intensity*0.12;
+        // Spawn magma
+        if (c.heat>0.25 && Math.random()<intensity*0.08) {
+          magma.push({x:c.x, y:c.y, vx:(Math.random()-0.5)*1.5, vy:-Math.random()*1.2-0.3, life:1, sz:1.5+Math.random()*2.5});
+        }
+      }
+    }
+
+    c.vx*=0.935; c.vy*=0.935; c.rv*=0.95;
+    c.x+=c.vx; c.y+=c.vy; c.rot+=c.rv;
+  }
+
+  // Deep text reveal
+  for (const d of dChars) {
+    let mr = 0;
+    for (const c of chars) {
+      if (Math.abs(c.x-d.x)<25 && Math.abs(c.y-d.y)<18) {
+        mr = Math.max(mr, c.dmg*0.65, c.heat*0.35);
+      }
+    }
+    d.reveal += (mr-d.reveal)*0.025;
+  }
+
+  // Magma update
+  for (let i=magma.length-1; i>=0; i--) {
+    const m=magma[i];
+    m.x+=m.vx; m.y+=m.vy; m.vy+=0.015; m.life-=0.007;
+    if (m.life<=0) magma.splice(i,1);
+  }
+
+  render();
+  requestAnimationFrame(tick);
+}
+
+function render() {
+  // Dark warm background
+  X.fillStyle = '#1a1410';
+  X.fillRect(0,0,W,H);
+
+  // Plate regions + fault glow
+  for (let gy=0; gy<GH; gy++) for (let gx=0; gx<GW; gx++) {
+    const plate = pMap[gy*GW+gx];
+    const px=gx*GS, py=gy*GS;
+
+    // Check boundary
+    const isB = (gx>0 && pMap[gy*GW+gx-1]!==plate) ||
+                (gx<GW-1 && pMap[gy*GW+gx+1]!==plate) ||
+                (gy>0 && pMap[(gy-1)*GW+gx]!==plate) ||
+                (gy<GH-1 && pMap[(gy+1)*GW+gx]!==plate);
+
+    if (isB) {
+      // Magma glow at fault lines
+      const glow = 0.06 + qForce*0.012;
+      X.fillStyle = `rgba(200,55,8,${glow})`;
+      X.fillRect(px,py,GS,GS);
+      // Extra near mouse
+      if (mouse.down) {
+        const d = Math.sqrt((px-mouse.x)**2+(py-mouse.y)**2);
+        if (d<220) {
+          X.fillStyle = `rgba(255,110,18,${(1-d/220)*qForce*0.025})`;
+          X.fillRect(px,py,GS,GS);
+        }
+      }
+    } else {
+      // Subtle plate shading
+      const br = 20 + plate*2;
+      X.fillStyle = `rgb(${br+6},${br},${br-5})`;
+      X.fillRect(px,py,GS,GS);
+    }
+  }
+
+  // Deep text
+  X.font = 'bold 14px monospace';
+  X.textBaseline = 'alphabetic';
+  for (const d of dChars) {
+    if (d.reveal<0.008) continue;
+    X.save();
+    X.globalAlpha = d.reveal*0.55;
+    X.fillStyle = '#c03808';
+    X.shadowColor = 'rgba(255,70,15,0.6)';
+    X.shadowBlur = d.reveal*14;
+    X.fillText(d.ch, d.x, d.y);
+    X.restore();
+  }
+
+  // Magma particles
+  for (const m of magma) {
+    X.save();
+    X.globalAlpha = m.life*0.9;
+    X.fillStyle = `hsl(${18+m.life*25},100%,${48+m.life*32}%)`;
+    X.shadowColor = 'rgba(255,90,15,0.7)';
+    X.shadowBlur = m.sz*3;
+    X.beginPath();
+    X.arc(m.x, m.y, m.sz*m.life, 0, Math.PI*2);
+    X.fill();
+    X.restore();
+  }
+
+  // Surface text
+  X.font = FS+'px Georgia,serif';
+  X.textBaseline = 'alphabetic';
+  for (const c of chars) {
+    const spd = Math.sqrt(c.vx*c.vx+c.vy*c.vy);
+    const h = c.heat, d = c.dmg;
+
+    // Color: cream -> orange -> red with heat/damage
+    const r = Math.min(255, Math.round(200+h*55+d*55));
+    const g = Math.max(0, Math.round(180-h*90-d*70));
+    const b = Math.max(0, Math.round(130-h*110-d*100));
+    const alpha = Math.max(0.08, 0.88 - spd*0.015 - d*0.15);
+
+    X.save();
+    X.translate(c.x, c.y);
+    X.rotate(c.rot);
+    X.globalAlpha = alpha;
+    X.fillStyle = `rgb(${r},${g},${b})`;
+
+    if (h>0.15 || d>0.15) {
+      X.shadowColor = `rgba(255,${55+h*70},8,${(h+d)*0.35})`;
+      X.shadowBlur = (h+d)*12;
+    }
+    X.fillText(c.ch, 0, 0);
+    X.restore();
+  }
+
+  // Quake radius indicator
+  if (qForce>0.5 && mouse.x>0) {
+    X.save();
+    X.strokeStyle = `rgba(255,70,15,${qForce*0.035})`;
+    X.lineWidth = 1.5;
+    X.beginPath();
+    X.arc(mouse.x, mouse.y, 190+qForce*22, 0, Math.PI*2);
+    X.stroke();
+    X.restore();
+  }
+
+  // HUD
+  X.save();
+  X.font = '10px monospace';
+  X.fillStyle = 'rgba(180,120,55,0.22)';
+  if (totQ>0) X.fillText('seismic events: '+totQ, W-165, H-10);
+  X.fillText('click to trigger earthquake', 12, H-10);
+  X.restore();
+}
+
+tick();
+</script>
+</body>
+</html>

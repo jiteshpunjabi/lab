@@ -1,0 +1,543 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Last Light</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { background: #000; overflow: hidden; }
+canvas { display: block; }
+#phase-label {
+  position: fixed;
+  bottom: 30px;
+  left: 0;
+  right: 0;
+  text-align: center;
+  font-family: 'Georgia', serif;
+  font-size: 14px;
+  letter-spacing: 4px;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0);
+  transition: color 2s ease;
+  pointer-events: none;
+  z-index: 10;
+}
+#timeline {
+  position: fixed;
+  bottom: 12px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 200px;
+  height: 2px;
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 1px;
+  pointer-events: none;
+  z-index: 10;
+}
+#timeline-fill {
+  height: 100%;
+  width: 0%;
+  background: rgba(255, 255, 255, 0.4);
+  border-radius: 1px;
+  transition: width 0.5s linear;
+}
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="phase-label"></div>
+<div id="timeline"><div id="timeline-fill"></div></div>
+<script>
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d');
+const label = document.getElementById('phase-label');
+const timelineFill = document.getElementById('timeline-fill');
+
+const W = 1280, H = 720;
+canvas.width = W;
+canvas.height = H;
+
+// Stellar lifecycle phases (times in seconds)
+const PHASES = [
+  { name: 'Stellar Nursery',     start: 0,  end: 10 },
+  { name: 'Main Sequence',       start: 10, end: 28 },
+  { name: 'Hydrogen Exhaustion', start: 28, end: 36 },
+  { name: 'Red Giant',           start: 36, end: 50 },
+  { name: 'Helium Flash',        start: 50, end: 55 },
+  { name: 'Planetary Nebula',    start: 55, end: 72 },
+  { name: 'White Dwarf',         start: 72, end: 85 },
+  { name: 'Black Dwarf',         start: 85, end: 100 },
+];
+const TOTAL_DURATION = 100;
+
+// Star particles for the background
+const stars = [];
+for (let i = 0; i < 300; i++) {
+  stars.push({
+    x: Math.random() * W,
+    y: Math.random() * H,
+    r: Math.random() * 1.5 + 0.3,
+    twinkle: Math.random() * Math.PI * 2,
+    speed: Math.random() * 0.5 + 0.2
+  });
+}
+
+// Nebula particles (ejected in planetary nebula phase)
+const nebulaParticles = [];
+const MAX_NEBULA = 800;
+
+// Dust particles for the nursery
+const dustParticles = [];
+for (let i = 0; i < 400; i++) {
+  const angle = Math.random() * Math.PI * 2;
+  const dist = Math.random() * 350 + 30;
+  dustParticles.push({
+    angle,
+    dist,
+    size: Math.random() * 4 + 1.5,
+    speed: (Math.random() * 0.4 + 0.1) * (Math.random() < 0.5 ? 1 : -1),
+    hue: Math.random() < 0.6 ? (Math.random() * 60 + 200) : (Math.random() * 40 + 310), // blue-purple + pink
+    opacity: Math.random() * 0.5 + 0.15
+  });
+}
+
+let startTime = null;
+let currentPhase = '';
+let finished = false;
+
+function easeInOut(t) {
+  return t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2;
+}
+
+function lerp(a, b, t) {
+  return a + (b - a) * Math.max(0, Math.min(1, t));
+}
+
+function getPhase(t) {
+  for (const p of PHASES) {
+    if (t >= p.start && t < p.end) return p;
+  }
+  return PHASES[PHASES.length - 1];
+}
+
+function phaseProgress(t, phase) {
+  return (t - phase.start) / (phase.end - phase.start);
+}
+
+function drawBackground(t) {
+  // Base black
+  ctx.fillStyle = '#000';
+  ctx.fillRect(0, 0, W, H);
+}
+
+function drawStars(t, dimFactor = 1) {
+  for (const s of stars) {
+    const twinkle = Math.sin(t * s.speed + s.twinkle) * 0.3 + 0.7;
+    const alpha = twinkle * dimFactor;
+    if (alpha <= 0) continue;
+    ctx.beginPath();
+    ctx.arc(s.x, s.y, s.r, 0, Math.PI * 2);
+    ctx.fillStyle = `rgba(220, 230, 255, ${alpha})`;
+    ctx.fill();
+  }
+}
+
+function drawNurseryDust(t, opacity) {
+  const cx = W / 2, cy = H / 2;
+  for (const d of dustParticles) {
+    d.angle += d.speed * 0.005;
+    const x = cx + Math.cos(d.angle) * d.dist;
+    const y = cy + Math.sin(d.angle) * d.dist * 0.6;
+    // Soft glow around each particle
+    const glowR = d.size * 3;
+    const glow = ctx.createRadialGradient(x, y, 0, x, y, glowR);
+    glow.addColorStop(0, `hsla(${d.hue}, 70%, 60%, ${d.opacity * opacity * 0.6})`);
+    glow.addColorStop(1, 'rgba(0,0,0,0)');
+    ctx.beginPath();
+    ctx.arc(x, y, glowR, 0, Math.PI * 2);
+    ctx.fillStyle = glow;
+    ctx.fill();
+    // Core
+    ctx.beginPath();
+    ctx.arc(x, y, d.size, 0, Math.PI * 2);
+    ctx.fillStyle = `hsla(${d.hue}, 70%, 65%, ${d.opacity * opacity})`;
+    ctx.fill();
+  }
+}
+
+function drawStar(cx, cy, radius, coreColor, coronaColor, coronaRadius, pulseAmt = 0, pulseFreq = 1, t = 0) {
+  const pulse = pulseAmt > 0 ? Math.sin(t * pulseFreq) * pulseAmt : 0;
+  const r = radius + pulse;
+  const cr = coronaRadius + pulse * 1.5;
+
+  // Outer corona glow
+  const outerGrad = ctx.createRadialGradient(cx, cy, r * 0.5, cx, cy, cr);
+  outerGrad.addColorStop(0, coronaColor);
+  outerGrad.addColorStop(1, 'rgba(0,0,0,0)');
+  ctx.beginPath();
+  ctx.arc(cx, cy, cr, 0, Math.PI * 2);
+  ctx.fillStyle = outerGrad;
+  ctx.fill();
+
+  // Inner star body
+  const innerGrad = ctx.createRadialGradient(cx, cy, 0, cx, cy, r);
+  innerGrad.addColorStop(0, '#fff');
+  innerGrad.addColorStop(0.3, coreColor);
+  innerGrad.addColorStop(1, coronaColor);
+  ctx.beginPath();
+  ctx.arc(cx, cy, r, 0, Math.PI * 2);
+  ctx.fillStyle = innerGrad;
+  ctx.fill();
+}
+
+function drawConvectionCells(cx, cy, radius, t, intensity) {
+  ctx.save();
+  ctx.globalAlpha = intensity * 0.3;
+  for (let i = 0; i < 12; i++) {
+    const angle = (i / 12) * Math.PI * 2 + t * 0.2;
+    const dist = radius * 0.6;
+    const x = cx + Math.cos(angle) * dist;
+    const y = cy + Math.sin(angle) * dist;
+    const cellR = radius * 0.25 + Math.sin(t * 0.8 + i) * radius * 0.05;
+    const grad = ctx.createRadialGradient(x, y, 0, x, y, cellR);
+    grad.addColorStop(0, 'rgba(255, 200, 50, 0.4)');
+    grad.addColorStop(1, 'rgba(255, 80, 20, 0)');
+    ctx.beginPath();
+    ctx.arc(x, y, cellR, 0, Math.PI * 2);
+    ctx.fillStyle = grad;
+    ctx.fill();
+  }
+  ctx.restore();
+}
+
+function emitNebula(cx, cy, t) {
+  if (nebulaParticles.length >= MAX_NEBULA) return;
+  for (let i = 0; i < 8; i++) {
+    const angle = Math.random() * Math.PI * 2;
+    const speed = Math.random() * 2.5 + 0.5;
+    const hue = Math.random() < 0.5 ?
+      (Math.random() * 40 + 160) : // cyan-green
+      (Math.random() * 40 + 300);  // magenta-pink
+    nebulaParticles.push({
+      x: cx + Math.cos(angle) * 20,
+      y: cy + Math.sin(angle) * 20,
+      vx: Math.cos(angle) * speed,
+      vy: Math.sin(angle) * speed,
+      size: Math.random() * 4 + 2,
+      hue,
+      life: 1,
+      decay: Math.random() * 0.003 + 0.001,
+      born: t
+    });
+  }
+}
+
+function updateAndDrawNebula(t) {
+  for (let i = nebulaParticles.length - 1; i >= 0; i--) {
+    const p = nebulaParticles[i];
+    p.x += p.vx;
+    p.y += p.vy;
+    p.vx *= 0.998;
+    p.vy *= 0.998;
+    p.life -= p.decay;
+    p.size += 0.02;
+    if (p.life <= 0) {
+      nebulaParticles.splice(i, 1);
+      continue;
+    }
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
+    ctx.fillStyle = `hsla(${p.hue}, 70%, 60%, ${p.life * 0.5})`;
+    ctx.fill();
+  }
+}
+
+function drawRemnant(cx, cy, radius, brightness, t) {
+  if (brightness <= 0.01) return;
+  // Faint white dwarf
+  const grad = ctx.createRadialGradient(cx, cy, 0, cx, cy, radius);
+  grad.addColorStop(0, `rgba(200, 220, 255, ${brightness})`);
+  grad.addColorStop(0.5, `rgba(150, 170, 220, ${brightness * 0.5})`);
+  grad.addColorStop(1, 'rgba(0, 0, 0, 0)');
+  ctx.beginPath();
+  ctx.arc(cx, cy, radius, 0, Math.PI * 2);
+  ctx.fillStyle = grad;
+  ctx.fill();
+}
+
+function setLabel(text) {
+  if (text !== currentPhase) {
+    currentPhase = text;
+    label.style.color = 'rgba(255,255,255,0)';
+    setTimeout(() => {
+      label.textContent = text;
+      label.style.color = 'rgba(255,255,255,0.5)';
+    }, 500);
+  }
+}
+
+function render(timestamp) {
+  if (!startTime) startTime = timestamp;
+  const elapsed = (timestamp - startTime) / 1000;
+  const t = Math.min(elapsed, TOTAL_DURATION);
+
+  // Timeline progress
+  timelineFill.style.width = (t / TOTAL_DURATION * 100) + '%';
+
+  const phase = getPhase(t);
+  const p = phaseProgress(t, phase);
+  setLabel(phase.name);
+
+  const cx = W / 2, cy = H / 2;
+
+  drawBackground(t);
+
+  // === PHASE RENDERING ===
+
+  if (phase.name === 'Stellar Nursery') {
+    // Dark cloud of dust slowly collapsing, faint glow forming at center
+    drawStars(t, 0.4 + p * 0.3);
+
+    // Large nebula glow clouds behind dust
+    ctx.save();
+    for (let i = 0; i < 5; i++) {
+      const a = (i / 5) * Math.PI * 2 + t * 0.02;
+      const d = 120 + Math.sin(t * 0.1 + i * 1.5) * 40;
+      const nx = cx + Math.cos(a) * d;
+      const ny = cy + Math.sin(a) * d;
+      const ng = ctx.createRadialGradient(nx, ny, 0, nx, ny, 100 + i * 20);
+      const hue = i % 2 === 0 ? 240 : 320;
+      ng.addColorStop(0, `hsla(${hue}, 60%, 40%, 0.15)`);
+      ng.addColorStop(1, 'rgba(0, 0, 0, 0)');
+      ctx.beginPath();
+      ctx.arc(nx, ny, 100 + i * 20, 0, Math.PI * 2);
+      ctx.fillStyle = ng;
+      ctx.fill();
+    }
+    ctx.restore();
+
+    drawNurseryDust(t, 1 - p * 0.3);
+    // Nascent glow — brighter
+    const glow = easeInOut(p);
+    const grad = ctx.createRadialGradient(cx, cy, 0, cx, cy, 40 + glow * 30);
+    grad.addColorStop(0, `rgba(255, 220, 130, ${0.3 + glow * 0.6})`);
+    grad.addColorStop(0.5, `rgba(255, 160, 60, ${0.15 + glow * 0.3})`);
+    grad.addColorStop(1, 'rgba(0, 0, 0, 0)');
+    ctx.beginPath();
+    ctx.arc(cx, cy, 60 + glow * 30, 0, Math.PI * 2);
+    ctx.fillStyle = grad;
+    ctx.fill();
+
+    // Dust spiraling inward
+    for (const d of dustParticles) {
+      d.dist -= p * 0.2;
+      if (d.dist < 10) d.dist = 10;
+    }
+  }
+
+  else if (phase.name === 'Main Sequence') {
+    // Stable, bright yellow-white star
+    drawStars(t);
+    const starRadius = lerp(25, 40, easeInOut(Math.min(p * 2, 1)));
+    drawStar(cx, cy, starRadius, '#fffbe0', 'rgba(255, 220, 100, 0.3)', 120, 1, 0.5, t);
+    // Subtle surface detail
+    drawConvectionCells(cx, cy, starRadius, t, 0.5);
+  }
+
+  else if (phase.name === 'Hydrogen Exhaustion') {
+    // Star begins to redden and swell
+    drawStars(t);
+    const swell = easeInOut(p);
+    const starRadius = lerp(40, 70, swell);
+    const r = Math.floor(lerp(255, 255, swell));
+    const g = Math.floor(lerp(220, 140, swell));
+    const b = Math.floor(lerp(100, 50, swell));
+    const coreColor = `rgb(${r}, ${g}, ${b})`;
+    const coronaColor = `rgba(${r}, ${Math.floor(g * 0.6)}, ${Math.floor(b * 0.3)}, 0.3)`;
+    drawStar(cx, cy, starRadius, coreColor, coronaColor, 150 + swell * 40, 2 + swell * 3, 0.8, t);
+    drawConvectionCells(cx, cy, starRadius, t, 0.5 + swell * 0.3);
+    // Flicker
+    if (Math.random() < swell * 0.1) {
+      ctx.globalAlpha = 0.1;
+      const flareAngle = Math.random() * Math.PI * 2;
+      ctx.beginPath();
+      ctx.moveTo(cx, cy);
+      ctx.lineTo(
+        cx + Math.cos(flareAngle) * (starRadius + 30),
+        cy + Math.sin(flareAngle) * (starRadius + 30)
+      );
+      ctx.strokeStyle = `rgba(255, 150, 50, 0.5)`;
+      ctx.lineWidth = 3;
+      ctx.stroke();
+      ctx.globalAlpha = 1;
+    }
+  }
+
+  else if (phase.name === 'Red Giant') {
+    // Massive swollen red star, background stars dimmed by its glow
+    const swell = easeInOut(p);
+    drawStars(t, Math.max(0.1, 1 - swell * 0.8));
+    const starRadius = lerp(70, 160, swell);
+    drawStar(cx, cy, starRadius, '#ff8833', 'rgba(255, 60, 20, 0.25)', 250 + swell * 80, 5 + swell * 8, 0.4, t);
+    drawConvectionCells(cx, cy, starRadius, t, 0.8 + swell * 0.2);
+
+    // Solar prominences
+    ctx.save();
+    ctx.globalAlpha = 0.4;
+    for (let i = 0; i < 5; i++) {
+      const angle = (i / 5) * Math.PI * 2 + t * 0.05;
+      const length = starRadius + 20 + Math.sin(t * 0.7 + i * 2) * 30;
+      const x1 = cx + Math.cos(angle) * starRadius * 0.9;
+      const y1 = cy + Math.sin(angle) * starRadius * 0.9;
+      const x2 = cx + Math.cos(angle + 0.1) * length;
+      const y2 = cy + Math.sin(angle + 0.1) * length;
+      const cpx = cx + Math.cos(angle + 0.05) * (length + 20);
+      const cpy = cy + Math.sin(angle + 0.05) * (length + 20);
+      ctx.beginPath();
+      ctx.moveTo(x1, y1);
+      ctx.quadraticCurveTo(cpx, cpy, x2, y2);
+      ctx.strokeStyle = 'rgba(255, 100, 30, 0.6)';
+      ctx.lineWidth = 3;
+      ctx.stroke();
+    }
+    ctx.restore();
+  }
+
+  else if (phase.name === 'Helium Flash') {
+    // Violent bright flash, the star contracts
+    const flash = Math.sin(p * Math.PI); // peaks in middle
+    const intensity = flash * flash;
+    drawStars(t, 0.1);
+
+    // Blinding white flash
+    const flashRadius = lerp(160, 80, p);
+    drawStar(cx, cy, flashRadius, '#fff', `rgba(255, 255, 200, ${intensity * 0.5})`, 300 + intensity * 200, 10, 2, t);
+
+    // Screen flash
+    ctx.fillStyle = `rgba(255, 255, 240, ${intensity * 0.3})`;
+    ctx.fillRect(0, 0, W, H);
+
+    // Shockwave rings
+    for (let i = 0; i < 3; i++) {
+      const ringP = (p + i * 0.15) % 1;
+      const ringR = ringP * 400;
+      ctx.beginPath();
+      ctx.arc(cx, cy, ringR, 0, Math.PI * 2);
+      ctx.strokeStyle = `rgba(255, 220, 150, ${(1 - ringP) * 0.4})`;
+      ctx.lineWidth = 2;
+      ctx.stroke();
+    }
+  }
+
+  else if (phase.name === 'Planetary Nebula') {
+    // The outer layers are blown off, revealing tiny hot core
+    drawStars(t, 0.5 + p * 0.5);
+
+    // Emit nebula particles
+    if (p < 0.6) {
+      emitNebula(cx, cy, t);
+    }
+    updateAndDrawNebula(t);
+
+    // Nebula shells — concentric expanding rings
+    for (let i = 0; i < 4; i++) {
+      const shellP = Math.max(0, p - i * 0.1);
+      const shellR = shellP * 250;
+      const shellOpacity = Math.max(0, (1 - shellP) * 0.2);
+      if (shellR > 0) {
+        const hue = i % 2 === 0 ? 180 : 320;
+        ctx.beginPath();
+        ctx.arc(cx, cy, shellR, 0, Math.PI * 2);
+        ctx.strokeStyle = `hsla(${hue}, 70%, 60%, ${shellOpacity})`;
+        ctx.lineWidth = shellR * 0.08;
+        ctx.stroke();
+      }
+    }
+
+    // Shrinking hot core
+    const coreRadius = lerp(60, 8, easeInOut(p));
+    drawStar(cx, cy, coreRadius, '#aaccff', 'rgba(100, 150, 255, 0.3)', coreRadius * 3, 0.5, 1, t);
+  }
+
+  else if (phase.name === 'White Dwarf') {
+    // Tiny fading star, nebula dispersing
+    drawStars(t);
+    updateAndDrawNebula(t);
+
+    const brightness = lerp(1, 0.3, easeInOut(p));
+    drawRemnant(cx, cy, lerp(8, 6, p), brightness, t);
+
+    // Faint remaining nebula wisps
+    ctx.save();
+    ctx.globalAlpha = (1 - p) * 0.15;
+    for (let i = 0; i < 6; i++) {
+      const angle = (i / 6) * Math.PI * 2 + t * 0.01;
+      const dist = 200 + Math.sin(t * 0.1 + i) * 30;
+      const x = cx + Math.cos(angle) * dist;
+      const y = cy + Math.sin(angle) * dist;
+      const grad = ctx.createRadialGradient(x, y, 0, x, y, 40);
+      grad.addColorStop(0, i % 2 === 0 ? 'rgba(100, 200, 220, 0.3)' : 'rgba(200, 100, 180, 0.3)');
+      grad.addColorStop(1, 'rgba(0, 0, 0, 0)');
+      ctx.beginPath();
+      ctx.arc(x, y, 40, 0, Math.PI * 2);
+      ctx.fillStyle = grad;
+      ctx.fill();
+    }
+    ctx.restore();
+  }
+
+  else if (phase.name === 'Black Dwarf') {
+    // Everything fades to almost nothing
+    const fade = easeInOut(p);
+    drawStars(t, lerp(1, 0.05, fade));
+
+    // Faint remnant fading to nothing
+    const brightness = lerp(0.3, 0, fade);
+    drawRemnant(cx, cy, lerp(6, 4, fade), brightness, t);
+
+    // Final darkness
+    if (p > 0.8) {
+      const blackout = (p - 0.8) / 0.2;
+      ctx.fillStyle = `rgba(0, 0, 0, ${blackout * 0.95})`;
+      ctx.fillRect(0, 0, W, H);
+
+      // Final text
+      if (blackout > 0.5) {
+        const textAlpha = (blackout - 0.5) * 2;
+        ctx.save();
+        ctx.font = '16px Georgia, serif';
+        ctx.fillStyle = `rgba(100, 110, 130, ${textAlpha * 0.6})`;
+        ctx.textAlign = 'center';
+        ctx.fillText('10 billion years, compressed into moments', cx, cy);
+        ctx.font = '11px Georgia, serif';
+        ctx.fillStyle = `rgba(80, 90, 110, ${textAlpha * 0.4})`;
+        ctx.fillText('click to witness again', cx, cy + 30);
+        ctx.restore();
+      }
+    }
+  }
+
+  if (t >= TOTAL_DURATION && !finished) {
+    finished = true;
+    // Allow restart
+    canvas.addEventListener('click', () => {
+      startTime = null;
+      finished = false;
+      nebulaParticles.length = 0;
+      // Reset dust
+      for (const d of dustParticles) {
+        d.dist = Math.random() * 300 + 50;
+        d.angle = Math.random() * Math.PI * 2;
+      }
+      label.style.color = 'rgba(255,255,255,0)';
+    }, { once: true });
+  }
+
+  requestAnimationFrame(render);
+}
+
+requestAnimationFrame(render);
+</script>
+</body>
+</html>

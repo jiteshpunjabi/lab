@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html>
+<head>
+<title>Wave Interference Visualizer</title>
+<style>
+    body { margin: 0; overflow: hidden; background-color: #000; }
+    canvas { display: block; width: 100vw; height: 100vh; }
+</style>
+</head>
+<body>
+<canvas id="glCanvas"></canvas>
+
+<script>
+    const canvas = document.getElementById('glCanvas');
+    const ctx = canvas.getContext('2d');
+
+    // Set canvas size to viewport dimensions
+    function resizeCanvas() {
+        canvas.width = window.innerWidth;
+        canvas.height = window.innerHeight;
+    }
+    window.addEventListener('resize', resizeCanvas);
+    resizeCanvas();
+
+    // Mouse tracking variables
+    let mouseX = canvas.width / 2;
+    let mouseY = canvas.height / 2;
+
+    window.addEventListener('mousemove', (event) => {
+        mouseX = event.clientX;
+        mouseY = event.clientY;
+    });
+
+    const buffer = new Float32Array(canvas.width * 2);
+    const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+    const data = imageData.data;
+
+    // Animation loop
+    function draw() {
+        const time = Date.now() * 0.001;
+        const w = canvas.width;
+        const h = canvas.height;
+
+        // Clear the screen with a very dark background
+        data.fill(0, 0, 0, 0);
+
+        for (let y = 0; y < h; y++) {
+            for (let x = 0; x < w; x++) {
+                const i = (y * w + x) * 4;
+                
+                // Calculate wave components influenced by position and time
+                // Wave 1: Influenced by sine waves modulated by X
+                const wave1 = Math.sin(x * 0.01 + time * 1.5) * Math.cos((y - mouseY) * 0.01);
+                // Wave 2: Influenced by sine waves modulated by Y
+                const wave2 = Math.cos(y * 0.01 + time * 1.2) * Math.sin((x - mouseX) * 0.01);
+                
+                // Combine waves and normalize for color value (0 to 1 range)
+                const interference = wave1 * 0.5 + wave2 * 0.5;
+                
+                // Map the interference value to color components (Blue/Green/Red)
+                // We use a simple mapping for visualization:
+                let r = Math.floor((interference + 1) * 0.5);
+                let g = Math.floor(Math.abs(Math.sin(x * 0.005 + time * 0.8)) * 127 + 128);
+                let b = Math.floor(Math.abs(Math.cos(y * 0.005 + time * 0.8)) * 127 + 128);
+
+                // Apply a slight decay based on distance from center (for a focus effect)
+                const distFactor = 1 - (Math.sqrt(Math.pow(x - w/2, 2) + Math.pow(y - h/2, 2)) / Math.sqrt(Math.pow(w/2, 2) + Math.pow(h/2, 2)));
+                
+                const finalR = Math.min(255, r * (0.5 + distFactor * 0.5));
+                const finalG = Math.min(255, g * (0.5 + distFactor * 0.5));
+                const finalB = Math.min(255, b * (0.5 + distFactor * 0.5));
+
+                data[i] = finalR;       // Red
+                data[i + 1] = finalG;   // Green
+                data[i + 2] = finalB;   // Blue
+                data[i + 3] = 255;      // Alpha (fully opaque)
+            }
+        }
+
+        // Put the calculated data onto the canvas
+        ctx.putImageData(imageData, 0, 0);
+
+        requestAnimationFrame(draw);
+    }
+
+    // Start the visualization
+    draw();
+
+</script>
+</body>
+</html>

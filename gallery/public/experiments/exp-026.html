@@ -1,0 +1,329 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>exp-026 — Signal Corruption</title>
+<style>
+  * { margin: 0; padding: 0; }
+  body { overflow: hidden; background: #000; }
+  canvas { display: block; width: 100vw; height: 100vh; image-rendering: pixelated; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<script>
+const canvas = document.getElementById('c');
+const gl = canvas.getContext('webgl2');
+let W, H, time = 0, mouseX = 0.5, mouseY = 0.5;
+
+// Render at reduced resolution for pixelated glitch aesthetic
+const SCALE = 2;
+
+function resize() {
+  W = canvas.width = Math.floor(window.innerWidth / SCALE);
+  H = canvas.height = Math.floor(window.innerHeight / SCALE);
+  gl.viewport(0, 0, W, H);
+}
+window.addEventListener('resize', resize);
+resize();
+
+window.addEventListener('mousemove', e => {
+  mouseX = e.clientX / window.innerWidth;
+  mouseY = 1.0 - e.clientY / window.innerHeight;
+});
+
+function compileShader(src, type) {
+  const s = gl.createShader(type);
+  gl.shaderSource(s, src);
+  gl.compileShader(s);
+  if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) console.error(gl.getShaderInfoLog(s));
+  return s;
+}
+function createProgram(vs, fs) {
+  const p = gl.createProgram();
+  gl.attachShader(p, compileShader(vs, gl.VERTEX_SHADER));
+  gl.attachShader(p, compileShader(fs, gl.FRAGMENT_SHADER));
+  gl.linkProgram(p);
+  if (!gl.getProgramParameter(p, gl.LINK_STATUS)) console.error(gl.getProgramInfoLog(p));
+  return p;
+}
+
+const quadVS = `#version 300 es
+in vec2 a_pos;
+out vec2 v_uv;
+void main() {
+  v_uv = a_pos * 0.5 + 0.5;
+  gl_Position = vec4(a_pos, 0, 1);
+}`;
+
+const glitchFS = `#version 300 es
+precision highp float;
+in vec2 v_uv;
+out vec4 fragColor;
+
+uniform float u_time;
+uniform vec2 u_resolution;
+uniform vec2 u_mouse;
+uniform sampler2D u_prev;
+uniform float u_frame;
+
+float hash(float n) { return fract(sin(n) * 43758.5453); }
+float hash2(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+
+vec3 hsv2rgb(vec3 c) {
+  vec3 p = abs(fract(c.xxx + vec3(1.0, 2.0/3.0, 1.0/3.0)) * 6.0 - 3.0);
+  return c.z * mix(vec3(1.0), clamp(p - 1.0, 0.0, 1.0), c.y);
+}
+
+// SMPTE color bars - the signal being corrupted
+vec3 colorBars(vec2 uv, float t) {
+  float barIdx = floor(uv.x * 7.0);
+  vec3 bars[7] = vec3[7](
+    vec3(1,1,1), vec3(1,1,0), vec3(0,1,1),
+    vec3(0,1,0), vec3(1,0,1), vec3(1,0,0), vec3(0,0,1)
+  );
+  int idx = int(mod(barIdx, 7.0));
+
+  // Test pattern circles
+  vec2 c = uv - 0.5;
+  float dist = length(c);
+  float rings = sin(dist * 40.0 + t * 3.0) * 0.5 + 0.5;
+  float spokes = sin(atan(c.y, c.x) * 8.0 + t) * 0.5 + 0.5;
+
+  // Phase between bars and pattern
+  float phase = sin(t * 0.4) * 0.5 + 0.5;
+  vec3 bar = bars[idx];
+  vec3 pattern = vec3(rings * spokes, spokes, rings) * 0.8;
+
+  return mix(bar, pattern, phase);
+}
+
+void main() {
+  vec2 uv = v_uv;
+  float t = u_time;
+  vec2 res = u_resolution;
+
+  float corruptLevel = 0.3 + u_mouse.x * 0.5;
+  float glitchBurst = step(0.88, hash(floor(t * 4.0)));
+
+  // === SCANLINE DISPLACEMENT (VHS tracking) ===
+  float burstY = fract(t * 0.7) * 0.8 + 0.1;
+  float nearBurst = 1.0 - smoothstep(0.0, 0.12, abs(uv.y - burstY));
+  float scanShift = nearBurst * (hash(floor(uv.y * res.y) + floor(t * 8.0)) - 0.3) * 0.15;
+
+  // Full-line jumps
+  float lineHash = hash(floor(uv.y * res.y) * 0.01 + floor(t * 3.0));
+  scanShift += step(0.97, lineHash) * (hash(floor(uv.y * res.y) * 7.3) - 0.5) * 0.4;
+
+  // Extra chaos during burst
+  scanShift += glitchBurst * (hash(floor(uv.y * res.y) * 3.1 + t) - 0.5) * 0.06;
+
+  vec2 shifted = vec2(fract(uv.x + scanShift), uv.y);
+
+  // === BASE SIGNAL ===
+  vec3 signal = colorBars(shifted, t);
+
+  // === JPEG MACROBLOCK CORRUPTION ===
+  vec2 blockSize = vec2(16.0) / res;
+  vec2 blockPos = floor(shifted / blockSize);
+  float blockHash = hash2(blockPos + floor(t * 1.5));
+
+  if (blockHash > (1.0 - corruptLevel * 0.5)) {
+    vec2 blockUV = fract(shifted / blockSize);
+    float freq = 1.0 + floor(blockHash * 6.0);
+    float dct = cos(blockUV.x * freq * 3.14159) * cos(blockUV.y * freq * 3.14159);
+
+    // Vivid wrong colors per block
+    float hue = blockHash * 6.28 + t * 0.5;
+    vec3 blockColor = hsv2rgb(vec3(fract(hue / 6.28), 0.9, 0.9)) * abs(dct);
+
+    // Some blocks solid (I-frame stuck)
+    if (blockHash > 0.92) {
+      blockColor = hsv2rgb(vec3(hash(blockPos.x + blockPos.y * 100.0 + floor(t)), 0.8, 0.95));
+    }
+
+    float blockMix = smoothstep(1.0 - corruptLevel * 0.5, 1.0, blockHash);
+    signal = mix(signal, blockColor, blockMix);
+  }
+
+  // === XOR DATA CORRUPTION BANDS ===
+  float bandPhase = fract(uv.y * 4.0 + t * 0.12);
+  float bandOn = smoothstep(0.0, 0.01, bandPhase) * (1.0 - smoothstep(0.07, 0.08, bandPhase));
+  if (bandOn > 0.0) {
+    vec2 px = shifted * res;
+    int xorVal = int(px.x) ^ int(px.y + t * 50.0);
+    float xf = float(xorVal & 255) / 255.0;
+    vec3 xorColor = vec3(
+      fract(xf * 7.13 + t * 0.1),
+      fract(xf * 3.97 + t * 0.07),
+      fract(xf * 11.31 + t * 0.03)
+    );
+    signal = mix(signal, xorColor, bandOn * 0.8);
+  }
+
+  // === PIXEL SORTING STREAKS ===
+  float sortPhase = sin(t * 0.5 + uv.y * 4.0) * 0.5 + 0.5;
+  if (sortPhase > 0.45) {
+    float luma = dot(signal, vec3(0.299, 0.587, 0.114));
+    float threshold = 0.15 + u_mouse.y * 0.3;
+    if (luma > threshold) {
+      // Create elongated streak by sampling along the row
+      float streakIntensity = (luma - threshold) / (1.0 - threshold);
+      float streakLen = streakIntensity * 60.0 / res.x;
+      vec3 streakColor = vec3(0.0);
+      vec3 maxColor = signal;
+      for (float i = 1.0; i <= 10.0; i++) {
+        vec2 sampleUV = vec2(shifted.x - i * streakLen / 10.0, shifted.y);
+        vec3 s = texture(u_prev, sampleUV).rgb;
+        streakColor += s;
+        maxColor = max(maxColor, s);
+      }
+      streakColor /= 10.0;
+      // Bright sorted streaks - keep the brightest channel dominant
+      vec3 sorted = mix(streakColor, maxColor, 0.6);
+      signal = mix(signal, sorted, sortPhase * 0.8 * streakIntensity);
+    }
+  }
+
+  // === CHROMATIC ABERRATION ===
+  float chromAmt = 0.004 + 0.015 * glitchBurst + corruptLevel * 0.008;
+  float chromAngle = t * 0.7;
+  vec2 rOff = vec2(cos(chromAngle), sin(chromAngle)) * chromAmt;
+  vec2 bOff = vec2(cos(chromAngle + 2.094), sin(chromAngle + 2.094)) * chromAmt;
+
+  vec3 prevR = texture(u_prev, shifted + rOff).rgb;
+  vec3 prevB = texture(u_prev, shifted + bOff).rgb;
+  vec3 prevG = texture(u_prev, shifted).rgb;
+
+  // Feedback blend with channel separation
+  float feedbackAmt = 0.2 + glitchBurst * 0.3;
+  signal.r = mix(signal.r, prevR.r, feedbackAmt);
+  signal.b = mix(signal.b, prevB.b, feedbackAmt);
+  signal.g = mix(signal.g, prevG.g, feedbackAmt * 0.5);
+
+  // === ENTROPY FIELD (mouse proximity) ===
+  float mdist = length(uv - u_mouse);
+  float order = smoothstep(0.25, 0.0, mdist);
+  if (order > 0.01) {
+    // Near mouse: ordered grid emerges from chaos
+    vec2 px = uv * res;
+    float gx = step(0.5, fract(px.x * 0.08));
+    float gy = step(0.5, fract(px.y * 0.08));
+    float grid = abs(gx - gy);
+    // Use signal's own colors but organized into grid
+    vec3 orderColor = signal * (0.5 + grid * 1.5);
+    signal = mix(signal, orderColor, order * 0.4);
+  }
+
+  // === BOOST SATURATION ===
+  float luma = dot(signal, vec3(0.299, 0.587, 0.114));
+  signal = mix(vec3(luma), signal, 1.3); // Push saturation
+  signal = clamp(signal, 0.0, 1.0);
+
+  // === QUANTIZATION (bit crush) ===
+  float levels = 6.0 + u_mouse.y * 18.0;
+  signal = floor(signal * levels + 0.5) / levels;
+
+  // === SCANLINES ===
+  float scanline = 0.88 + 0.12 * step(0.5, fract(v_uv.y * res.y * 0.5));
+  signal *= scanline;
+
+  // === OCCASIONAL INVERT FLASH ===
+  if (hash(floor(t * 20.0)) > 0.975) {
+    signal = 1.0 - signal;
+  }
+
+  // === VIGNETTE ===
+  vec2 vig = v_uv - 0.5;
+  float vigAmount = 1.0 - dot(vig, vig) * 1.5;
+  signal *= max(0.0, vigAmount);
+
+  fragColor = vec4(signal, 1.0);
+}`;
+
+const copyFS = `#version 300 es
+precision highp float;
+in vec2 v_uv;
+out vec4 fragColor;
+uniform sampler2D u_tex;
+void main() {
+  fragColor = texture(u_tex, v_uv);
+}`;
+
+const glitchProg = createProgram(quadVS, glitchFS);
+const copyProg = createProgram(quadVS, copyFS);
+
+// Quad buffer
+const buf = gl.createBuffer();
+gl.bindBuffer(gl.ARRAY_BUFFER, buf);
+gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1,-1,1,-1,-1,1,1,1]), gl.STATIC_DRAW);
+
+function bindQuad(prog) {
+  const loc = gl.getAttribLocation(prog, 'a_pos');
+  gl.enableVertexAttribArray(loc);
+  gl.vertexAttribPointer(loc, 2, gl.FLOAT, false, 0, 0);
+}
+
+// Ping-pong FBOs for feedback
+function makeFBO() {
+  const tex = gl.createTexture();
+  gl.bindTexture(gl.TEXTURE_2D, tex);
+  gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, W, H, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.REPEAT);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+  const fbo = gl.createFramebuffer();
+  gl.bindFramebuffer(gl.FRAMEBUFFER, fbo);
+  gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, tex, 0);
+  gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+  return { tex, fbo };
+}
+
+let fboA = makeFBO(), fboB = makeFBO();
+let frame = 0;
+
+function render() {
+  time += 0.016;
+  frame++;
+
+  // Render glitch to fboB, reading prev from fboA
+  gl.bindFramebuffer(gl.FRAMEBUFFER, fboB.fbo);
+  gl.useProgram(glitchProg);
+  gl.bindBuffer(gl.ARRAY_BUFFER, buf);
+  bindQuad(glitchProg);
+
+  gl.uniform1f(gl.getUniformLocation(glitchProg, 'u_time'), time);
+  gl.uniform2f(gl.getUniformLocation(glitchProg, 'u_resolution'), W, H);
+  gl.uniform2f(gl.getUniformLocation(glitchProg, 'u_mouse'), mouseX, mouseY);
+  gl.uniform1f(gl.getUniformLocation(glitchProg, 'u_frame'), frame);
+
+  gl.activeTexture(gl.TEXTURE0);
+  gl.bindTexture(gl.TEXTURE_2D, fboA.tex);
+  gl.uniform1i(gl.getUniformLocation(glitchProg, 'u_prev'), 0);
+
+  gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+
+  // Copy to screen
+  gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+  gl.useProgram(copyProg);
+  gl.bindBuffer(gl.ARRAY_BUFFER, buf);
+  bindQuad(copyProg);
+
+  gl.activeTexture(gl.TEXTURE0);
+  gl.bindTexture(gl.TEXTURE_2D, fboB.tex);
+  gl.uniform1i(gl.getUniformLocation(copyProg, 'u_tex'), 0);
+
+  gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+
+  // Swap
+  [fboA, fboB] = [fboB, fboA];
+
+  requestAnimationFrame(render);
+}
+
+render();
+</script>
+</body>
+</html>

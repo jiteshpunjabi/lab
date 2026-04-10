@@ -1,0 +1,424 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>exp-011 — Murmuration</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { background: #0a0612; overflow: hidden; }
+  canvas { display: block; }
+  #info {
+    position: fixed; bottom: 16px; left: 16px;
+    font: 12px/1.4 monospace; color: rgba(255,255,255,0.4);
+    pointer-events: none; z-index: 10;
+  }
+</style>
+</head>
+<body>
+<div id="info">exp-011 — murmuration<br>click to add predators · move mouse to scatter</div>
+<canvas id="c"></canvas>
+<script>
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d');
+let W, H;
+
+function resize() {
+  W = canvas.width = window.innerWidth;
+  H = canvas.height = window.innerHeight;
+}
+resize();
+window.addEventListener('resize', resize);
+
+// --- Config ---
+const BOID_COUNT = 400;
+const PREDATOR_INIT = 3;
+const MAX_SPEED_BOID = 3.5;
+const MAX_SPEED_PRED = 4.2;
+const PERCEPTION = 60;
+const PRED_PERCEPTION = 150;
+const SEP_WEIGHT = 2.5;
+const ALI_WEIGHT = 1.0;
+const COH_WEIGHT = 1.0;
+const FLEE_WEIGHT = 8.0;
+const PRED_CHASE_WEIGHT = 1.5;
+const PRED_SEP_WEIGHT = 3.0;
+const TRAIL_ALPHA = 0.08;
+
+// --- Helpers ---
+function dist2(a, b) {
+  const dx = a.x - b.x, dy = a.y - b.y;
+  return dx * dx + dy * dy;
+}
+function wrap(v) {
+  if (v.x < 0) v.x += W;
+  if (v.x > W) v.x -= W;
+  if (v.y < 0) v.y += H;
+  if (v.y > H) v.y -= H;
+}
+function limit(vx, vy, max) {
+  const m = Math.sqrt(vx * vx + vy * vy);
+  if (m > max) { const s = max / m; return [vx * s, vy * s]; }
+  return [vx, vy];
+}
+function hsl(h, s, l) {
+  return `hsl(${h}, ${s}%, ${l}%)`;
+}
+
+// --- Spatial hash ---
+const CELL = 70;
+let grid = {};
+function gridKey(x, y) {
+  return ((x / CELL) | 0) + ',' + ((y / CELL) | 0);
+}
+function gridInsert(entity) {
+  const k = gridKey(entity.x, entity.y);
+  if (!grid[k]) grid[k] = [];
+  grid[k].push(entity);
+}
+function gridQuery(x, y, r) {
+  const results = [];
+  const cr = Math.ceil(r / CELL);
+  const cx = (x / CELL) | 0;
+  const cy = (y / CELL) | 0;
+  for (let dx = -cr; dx <= cr; dx++) {
+    for (let dy = -cr; dy <= cr; dy++) {
+      const k = (cx + dx) + ',' + (cy + dy);
+      if (grid[k]) {
+        for (const e of grid[k]) results.push(e);
+      }
+    }
+  }
+  return results;
+}
+
+// --- Entities ---
+class Boid {
+  constructor(x, y) {
+    this.x = x || Math.random() * W;
+    this.y = y || Math.random() * H;
+    const a = Math.random() * Math.PI * 2;
+    this.vx = Math.cos(a) * 2;
+    this.vy = Math.sin(a) * 2;
+    this.hue = 180 + Math.random() * 60; // cyan-teal range
+    this.type = 'boid';
+    this.fleeing = 0;
+  }
+
+  update(boids, predators) {
+    let sepX = 0, sepY = 0, sepN = 0;
+    let aliX = 0, aliY = 0, aliN = 0;
+    let cohX = 0, cohY = 0, cohN = 0;
+    let fleeX = 0, fleeY = 0, fleeN = 0;
+
+    const nearby = gridQuery(this.x, this.y, PERCEPTION);
+    for (const other of nearby) {
+      if (other === this) continue;
+      if (other.type !== 'boid') continue;
+      const d2 = dist2(this, other);
+      if (d2 > PERCEPTION * PERCEPTION || d2 === 0) continue;
+      const d = Math.sqrt(d2);
+
+      // Separation
+      if (d < 25) {
+        sepX += (this.x - other.x) / d;
+        sepY += (this.y - other.y) / d;
+        sepN++;
+      }
+      // Alignment
+      aliX += other.vx;
+      aliY += other.vy;
+      aliN++;
+      // Cohesion
+      cohX += other.x;
+      cohY += other.y;
+      cohN++;
+    }
+
+    // Flee from predators
+    for (const pred of predators) {
+      const d2 = dist2(this, pred);
+      if (d2 < PRED_PERCEPTION * PRED_PERCEPTION && d2 > 0) {
+        const d = Math.sqrt(d2);
+        fleeX += (this.x - pred.x) / d * (PRED_PERCEPTION / d);
+        fleeY += (this.y - pred.y) / d * (PRED_PERCEPTION / d);
+        fleeN++;
+      }
+    }
+
+    let ax = 0, ay = 0;
+    if (sepN > 0) { ax += (sepX / sepN) * SEP_WEIGHT; ay += (sepY / sepN) * SEP_WEIGHT; }
+    if (aliN > 0) { ax += (aliX / aliN - this.vx) * ALI_WEIGHT; ay += (aliY / aliN - this.vy) * ALI_WEIGHT; }
+    if (cohN > 0) { ax += (cohX / cohN - this.x) * 0.01 * COH_WEIGHT; ay += (cohY / cohN - this.y) * 0.01 * COH_WEIGHT; }
+    if (fleeN > 0) { ax += (fleeX / fleeN) * FLEE_WEIGHT; ay += (fleeY / fleeN) * FLEE_WEIGHT; }
+
+    this.fleeing = fleeN > 0 ? Math.min(1, this.fleeing + 0.15) : Math.max(0, this.fleeing - 0.02);
+
+    // Mouse avoidance
+    const mdx = this.x - mouseX, mdy = this.y - mouseY;
+    const md2 = mdx * mdx + mdy * mdy;
+    if (md2 < 120 * 120 && md2 > 0) {
+      const md = Math.sqrt(md2);
+      ax += (mdx / md) * 5;
+      ay += (mdy / md) * 5;
+    }
+
+    this.vx += ax;
+    this.vy += ay;
+    const speed = this.fleeing > 0.5 ? MAX_SPEED_BOID * 1.5 : MAX_SPEED_BOID;
+    [this.vx, this.vy] = limit(this.vx, this.vy, speed);
+
+    this.x += this.vx;
+    this.y += this.vy;
+    wrap(this);
+
+    // Shift hue based on local density
+    if (aliN > 8) this.hue += 0.3;
+    else if (aliN < 3) this.hue -= 0.2;
+    if (this.hue > 280) this.hue = 180;
+    if (this.hue < 160) this.hue = 280;
+  }
+
+  draw() {
+    const angle = Math.atan2(this.vy, this.vx);
+    const speed = Math.sqrt(this.vx * this.vx + this.vy * this.vy);
+    const sz = 4 + speed * 0.8;
+
+    ctx.save();
+    ctx.translate(this.x, this.y);
+    ctx.rotate(angle);
+
+    const lightness = 55 + this.fleeing * 25;
+    const sat = 70 + this.fleeing * 30;
+    const h = this.fleeing > 0.3 ? this.hue + (360 - this.hue) * this.fleeing * 0.5 : this.hue;
+
+    ctx.fillStyle = hsl(h, sat, lightness);
+    ctx.globalAlpha = 0.85;
+    ctx.beginPath();
+    ctx.moveTo(sz, 0);
+    ctx.lineTo(-sz * 0.6, -sz * 0.4);
+    ctx.lineTo(-sz * 0.3, 0);
+    ctx.lineTo(-sz * 0.6, sz * 0.4);
+    ctx.closePath();
+    ctx.fill();
+
+    // Glow when fleeing
+    if (this.fleeing > 0.2) {
+      ctx.globalAlpha = this.fleeing * 0.3;
+      ctx.shadowColor = hsl(h, 100, 70);
+      ctx.shadowBlur = 10;
+      ctx.fill();
+      ctx.shadowBlur = 0;
+    }
+
+    ctx.restore();
+  }
+}
+
+class Predator {
+  constructor(x, y) {
+    this.x = x || Math.random() * W;
+    this.y = y || Math.random() * H;
+    const a = Math.random() * Math.PI * 2;
+    this.vx = Math.cos(a) * 2;
+    this.vy = Math.sin(a) * 2;
+    this.type = 'predator';
+    this.energy = 1;
+    this.kills = 0;
+    this.trail = [];
+  }
+
+  update(boids) {
+    // Find nearest boid cluster center
+    let targetX = 0, targetY = 0, targetN = 0;
+    let minD = Infinity;
+    let closest = null;
+
+    for (const b of boids) {
+      const d2 = dist2(this, b);
+      if (d2 < PRED_PERCEPTION * PRED_PERCEPTION * 4) {
+        targetX += b.x;
+        targetY += b.y;
+        targetN++;
+      }
+      if (d2 < minD) { minD = d2; closest = b; }
+    }
+
+    let ax = 0, ay = 0;
+
+    // Chase nearest cluster
+    if (targetN > 0) {
+      const cx = targetX / targetN;
+      const cy = targetY / targetN;
+      ax += (cx - this.x) * 0.005 * PRED_CHASE_WEIGHT;
+      ay += (cy - this.y) * 0.005 * PRED_CHASE_WEIGHT;
+    }
+
+    // Also steer toward absolute nearest boid
+    if (closest) {
+      const d = Math.sqrt(minD);
+      if (d > 0) {
+        ax += (closest.x - this.x) / d * PRED_CHASE_WEIGHT;
+        ay += (closest.y - this.y) / d * PRED_CHASE_WEIGHT;
+      }
+    }
+
+    // Separate from other predators
+    for (const other of predators) {
+      if (other === this) continue;
+      const d2 = dist2(this, other);
+      if (d2 < 200 * 200 && d2 > 0) {
+        const d = Math.sqrt(d2);
+        ax += (this.x - other.x) / d * PRED_SEP_WEIGHT;
+        ay += (this.y - other.y) / d * PRED_SEP_WEIGHT;
+      }
+    }
+
+    this.vx += ax;
+    this.vy += ay;
+    [this.vx, this.vy] = limit(this.vx, this.vy, MAX_SPEED_PRED);
+
+    this.x += this.vx;
+    this.y += this.vy;
+    wrap(this);
+
+    // Store trail
+    this.trail.push({ x: this.x, y: this.y });
+    if (this.trail.length > 20) this.trail.shift();
+
+    // Energy decay
+    this.energy = Math.max(0.3, this.energy - 0.001);
+
+    // "Catch" boids that get too close — scatter them
+    if (closest && minD < 15 * 15) {
+      closest.vx += (closest.x - this.x) * 0.5;
+      closest.vy += (closest.y - this.y) * 0.5;
+      closest.fleeing = 1;
+      closest.hue = 0; // flash red
+      this.energy = Math.min(1, this.energy + 0.2);
+      this.kills++;
+    }
+  }
+
+  draw() {
+    // Draw trail
+    if (this.trail.length > 1) {
+      ctx.beginPath();
+      ctx.moveTo(this.trail[0].x, this.trail[0].y);
+      for (let i = 1; i < this.trail.length; i++) {
+        const dx = Math.abs(this.trail[i].x - this.trail[i-1].x);
+        const dy = Math.abs(this.trail[i].y - this.trail[i-1].y);
+        if (dx > W/2 || dy > H/2) {
+          ctx.moveTo(this.trail[i].x, this.trail[i].y);
+        } else {
+          ctx.lineTo(this.trail[i].x, this.trail[i].y);
+        }
+      }
+      ctx.strokeStyle = `rgba(255, 60, 30, ${0.15 * this.energy})`;
+      ctx.lineWidth = 2;
+      ctx.stroke();
+    }
+
+    const angle = Math.atan2(this.vy, this.vx);
+    const sz = 10 + this.energy * 4;
+
+    ctx.save();
+    ctx.translate(this.x, this.y);
+    ctx.rotate(angle);
+
+    // Predator body — larger, angular, red-orange
+    ctx.fillStyle = hsl(10, 90, 45 + this.energy * 20);
+    ctx.globalAlpha = 0.95;
+    ctx.shadowColor = 'rgba(255, 50, 20, 0.6)';
+    ctx.shadowBlur = 15 + this.energy * 10;
+
+    ctx.beginPath();
+    ctx.moveTo(sz, 0);
+    ctx.lineTo(-sz * 0.5, -sz * 0.5);
+    ctx.lineTo(-sz * 0.2, 0);
+    ctx.lineTo(-sz * 0.5, sz * 0.5);
+    ctx.closePath();
+    ctx.fill();
+
+    // Inner glow
+    ctx.fillStyle = hsl(30, 100, 70);
+    ctx.globalAlpha = 0.5 * this.energy;
+    ctx.beginPath();
+    ctx.moveTo(sz * 0.5, 0);
+    ctx.lineTo(-sz * 0.2, -sz * 0.2);
+    ctx.lineTo(0, 0);
+    ctx.lineTo(-sz * 0.2, sz * 0.2);
+    ctx.closePath();
+    ctx.fill();
+
+    ctx.shadowBlur = 0;
+    ctx.restore();
+  }
+}
+
+// --- Initialize ---
+let boids = [];
+let predators = [];
+for (let i = 0; i < BOID_COUNT; i++) boids.push(new Boid());
+for (let i = 0; i < PREDATOR_INIT; i++) predators.push(new Predator());
+
+let mouseX = W / 2, mouseY = H / 2;
+window.addEventListener('mousemove', e => { mouseX = e.clientX; mouseY = e.clientY; });
+window.addEventListener('click', e => {
+  predators.push(new Predator(e.clientX, e.clientY));
+});
+
+// --- Draw loop ---
+let frame = 0;
+function draw() {
+  // Fading trail effect
+  ctx.fillStyle = `rgba(10, 6, 18, ${TRAIL_ALPHA})`;
+  ctx.fillRect(0, 0, W, H);
+
+  // Rebuild spatial grid
+  grid = {};
+  for (const b of boids) gridInsert(b);
+
+  // Update
+  for (const b of boids) b.update(boids, predators);
+  for (const p of predators) p.update(boids);
+
+  // Draw boids
+  for (const b of boids) b.draw();
+
+  // Draw predators
+  for (const p of predators) p.draw();
+
+  // Draw subtle connection lines between very close boids
+  if (frame % 2 === 0) {
+    ctx.globalAlpha = 0.06;
+    ctx.strokeStyle = '#88eeff';
+    ctx.lineWidth = 0.5;
+    for (let i = 0; i < boids.length; i++) {
+      const a = boids[i];
+      const nearby = gridQuery(a.x, a.y, 30);
+      for (const b of nearby) {
+        if (b === a || b.type !== 'boid') continue;
+        const d2 = dist2(a, b);
+        if (d2 < 30 * 30) {
+          const dx = Math.abs(a.x - b.x);
+          const dy = Math.abs(a.y - b.y);
+          if (dx > W/2 || dy > H/2) continue;
+          ctx.beginPath();
+          ctx.moveTo(a.x, a.y);
+          ctx.lineTo(b.x, b.y);
+          ctx.stroke();
+        }
+      }
+    }
+    ctx.globalAlpha = 1;
+  }
+
+  frame++;
+  requestAnimationFrame(draw);
+}
+
+draw();
+</script>
+</body>
+</html>

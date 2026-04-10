@@ -1,0 +1,607 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>exp-041 — Stratigraphy</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { background: #0a0a0f; overflow: hidden; }
+canvas { display: block; width: 100vw; height: 100vh; cursor: crosshair; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<script>
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d');
+
+let W, H;
+function resize() {
+  W = canvas.width = window.innerWidth;
+  H = canvas.height = window.innerHeight;
+}
+resize();
+window.addEventListener('resize', resize);
+
+// --- Simulation parameters ---
+const COLS = 400;
+const MAX_LAYERS = 60;
+const EROSION_PARTICLES = 80;
+
+// Each column is a stack of layers with thickness and type
+// Types: sediment, sandstone, limestone, shale, basalt, granite, fossil
+const LAYER_COLORS = {
+  sediment:   { h: 35, s: 40, l: 55 },
+  sandstone:  { h: 30, s: 50, l: 45 },
+  limestone:  { h: 50, s: 25, l: 65 },
+  shale:      { h: 220, s: 15, l: 35 },
+  basalt:     { h: 0, s: 5, l: 25 },
+  granite:    { h: 350, s: 15, l: 45 },
+  clay:       { h: 20, s: 35, l: 40 },
+  chalk:      { h: 55, s: 10, l: 80 },
+  coal:       { h: 0, s: 0, l: 12 },
+  iron:       { h: 10, s: 60, l: 30 },
+};
+
+const LAYER_TYPES = Object.keys(LAYER_COLORS);
+
+// Columns: each has an array of { type, thickness, age, fossils }
+let columns = [];
+let age = 0; // geological age in "millions of years"
+let tectonicPhase = 0;
+let erosionDrops = [];
+let mouseX = 0.5, mouseY = 0.5;
+let mouseDown = false;
+
+canvas.addEventListener('mousemove', e => {
+  mouseX = e.clientX / W;
+  mouseY = e.clientY / H;
+});
+canvas.addEventListener('mousedown', () => mouseDown = true);
+canvas.addEventListener('mouseup', () => mouseDown = false);
+
+// Noise
+function hash(n) { return ((Math.sin(n * 127.1 + 311.7) * 43758.5453) % 1 + 1) % 1; }
+function noise1D(x) {
+  const i = Math.floor(x);
+  const f = x - i;
+  const u = f * f * (3 - 2 * f);
+  return hash(i) * (1 - u) + hash(i + 1) * u;
+}
+
+function fbm(x, octaves) {
+  let v = 0, a = 0.5, freq = 1;
+  for (let i = 0; i < octaves; i++) {
+    v += a * noise1D(x * freq);
+    freq *= 2.1;
+    a *= 0.5;
+  }
+  return v;
+}
+
+// Initialize with primordial layers
+function init() {
+  columns = [];
+  for (let i = 0; i < COLS; i++) {
+    const x = i / COLS;
+    const col = [];
+    // Granite bedrock
+    col.push({
+      type: 'granite',
+      thickness: 80 + fbm(x * 3, 4) * 40,
+      age: 4500,
+      fossils: []
+    });
+    // Basalt intrusion
+    col.push({
+      type: 'basalt',
+      thickness: 20 + fbm(x * 5 + 10, 3) * 30,
+      age: 3800,
+      fossils: []
+    });
+    // Ancient sediment
+    col.push({
+      type: 'shale',
+      thickness: 15 + fbm(x * 4 + 20, 3) * 20,
+      age: 3000,
+      fossils: []
+    });
+    // Limestone
+    col.push({
+      type: 'limestone',
+      thickness: 10 + fbm(x * 6 + 30, 3) * 15,
+      age: 2500,
+      fossils: []
+    });
+    columns.push(col);
+  }
+  age = 2500;
+}
+
+// Get total height of a column
+function colHeight(col) {
+  return col.reduce((sum, layer) => sum + layer.thickness, 0);
+}
+
+// --- Geological processes ---
+
+// Deposit a new layer across all columns
+function deposit() {
+  const typeIdx = Math.floor(Math.random() * 7); // bias toward sedimentary
+  const types = ['sediment', 'sandstone', 'limestone', 'shale', 'clay', 'chalk', 'coal'];
+  const type = types[typeIdx % types.length];
+  const baseThickness = 3 + Math.random() * 8;
+
+  for (let i = 0; i < COLS; i++) {
+    const x = i / COLS;
+    const variation = fbm(x * 8 + age * 0.1, 3);
+    const thickness = baseThickness * (0.5 + variation);
+
+    // Occasionally embed fossils
+    const fossils = [];
+    if (Math.random() < 0.03 && type !== 'basalt' && type !== 'granite') {
+      const fossilTypes = ['ammonite', 'trilobite', 'fern', 'fish', 'shell', 'bone'];
+      fossils.push({
+        type: fossilTypes[Math.floor(Math.random() * fossilTypes.length)],
+        x: 0.2 + Math.random() * 0.6,
+        y: Math.random()
+      });
+    }
+
+    columns[i].push({
+      type,
+      thickness: Math.max(thickness, 0.5),
+      age,
+      fossils
+    });
+  }
+}
+
+// Tectonic folding - sinusoidal deformation
+function tectonicFold() {
+  const center = Math.random();
+  const wavelength = 0.1 + Math.random() * 0.3;
+  const amplitude = 5 + Math.random() * 15;
+  const phase = Math.random() * Math.PI * 2;
+
+  for (let i = 0; i < COLS; i++) {
+    const x = i / COLS;
+    const dist = Math.abs(x - center);
+    const influence = Math.exp(-dist * dist / (wavelength * wavelength));
+    const lift = Math.sin((x - center) / wavelength * Math.PI * 2 + phase) * amplitude * influence;
+
+    // Apply by scaling all layer thicknesses proportionally
+    if (lift > 0) {
+      // Uplift: stretch layers
+      for (const layer of columns[i]) {
+        layer.thickness *= 1 + lift * 0.005;
+      }
+    } else {
+      // Compression: thin layers
+      for (const layer of columns[i]) {
+        layer.thickness *= 1 + lift * 0.003;
+        layer.thickness = Math.max(layer.thickness, 0.2);
+      }
+    }
+  }
+}
+
+// Fault line - vertical displacement
+function fault() {
+  const pos = 0.2 + Math.random() * 0.6;
+  const colIdx = Math.floor(pos * COLS);
+  const displacement = (Math.random() - 0.5) * 30;
+  const width = Math.floor(3 + Math.random() * 10);
+  const direction = displacement > 0 ? 1 : -1;
+
+  for (let i = 0; i < COLS; i++) {
+    const dist = i - colIdx;
+    let shift = 0;
+    if (direction > 0 && dist > 0 && dist < COLS / 3) {
+      shift = displacement * Math.exp(-dist * 0.02);
+    } else if (direction < 0 && dist < 0 && dist > -COLS / 3) {
+      shift = displacement * Math.exp(dist * 0.02);
+    }
+
+    if (Math.abs(shift) > 0.5) {
+      // Add or remove thickness from deepest sedimentary layer
+      const deepest = columns[i].findIndex(l => l.type !== 'granite' && l.type !== 'basalt');
+      if (deepest >= 0) {
+        columns[i][deepest].thickness += shift * 0.3;
+        columns[i][deepest].thickness = Math.max(columns[i][deepest].thickness, 0.5);
+      }
+    }
+  }
+
+  // Create a thin basalt intrusion at the fault
+  for (let di = -width; di <= width; di++) {
+    const ci = colIdx + di;
+    if (ci >= 0 && ci < COLS) {
+      const insertAt = Math.floor(columns[ci].length * 0.4);
+      if (columns[ci].length > insertAt) {
+        columns[ci].splice(insertAt, 0, {
+          type: 'iron',
+          thickness: 1.5 * (1 - Math.abs(di) / width),
+          age,
+          fossils: []
+        });
+      }
+    }
+  }
+}
+
+// Volcanic intrusion
+function volcanicIntrusion() {
+  const center = Math.floor(Math.random() * COLS);
+  const radius = 10 + Math.floor(Math.random() * 25);
+
+  for (let di = -radius; di <= radius; di++) {
+    const ci = center + di;
+    if (ci >= 0 && ci < COLS) {
+      const dist = Math.abs(di) / radius;
+      const intrusionThickness = (1 - dist * dist) * 15;
+      if (intrusionThickness > 0.5) {
+        columns[ci].push({
+          type: 'basalt',
+          thickness: intrusionThickness,
+          age,
+          fossils: []
+        });
+      }
+    }
+  }
+}
+
+// Surface erosion
+function erode() {
+  // Rain-driven erosion: material moves from high to low
+  for (let i = 1; i < COLS - 1; i++) {
+    const hL = colHeight(columns[i - 1]);
+    const hC = colHeight(columns[i]);
+    const hR = colHeight(columns[i + 1]);
+
+    const diffL = hC - hL;
+    const diffR = hC - hR;
+
+    // Erode peaks
+    if (diffL > 2 && diffR > 2) {
+      const topLayer = columns[i][columns[i].length - 1];
+      const erodeAmt = Math.min(topLayer.thickness * 0.03, (diffL + diffR) * 0.01);
+      topLayer.thickness -= erodeAmt;
+
+      // Deposit in lower neighbors
+      if (diffL > diffR) {
+        const target = columns[i - 1];
+        const targetTop = target[target.length - 1];
+        if (targetTop.type === topLayer.type) {
+          targetTop.thickness += erodeAmt * 0.7;
+        } else {
+          target.push({ type: 'sediment', thickness: erodeAmt * 0.5, age, fossils: [] });
+        }
+      } else {
+        const target = columns[i + 1];
+        const targetTop = target[target.length - 1];
+        if (targetTop.type === topLayer.type) {
+          targetTop.thickness += erodeAmt * 0.7;
+        } else {
+          target.push({ type: 'sediment', thickness: erodeAmt * 0.5, age, fossils: [] });
+        }
+      }
+
+      // Clean up tiny layers
+      if (topLayer.thickness < 0.1) {
+        columns[i].pop();
+      }
+    }
+  }
+
+  // Mouse-driven rain erosion
+  const rainCenter = Math.floor(mouseX * COLS);
+  const rainRadius = 30;
+  for (let di = -rainRadius; di <= rainRadius; di++) {
+    const ci = rainCenter + di;
+    if (ci >= 0 && ci < COLS) {
+      const dist = Math.abs(di) / rainRadius;
+      const rainIntensity = (1 - dist) * 0.15;
+      if (mouseDown) {
+        const topLayer = columns[ci][columns[ci].length - 1];
+        topLayer.thickness -= rainIntensity * 2;
+        if (topLayer.thickness < 0.1) columns[ci].pop();
+      }
+    }
+  }
+}
+
+// Remove very thin layers to keep performance
+function cleanLayers() {
+  for (let i = 0; i < COLS; i++) {
+    columns[i] = columns[i].filter(l => l.thickness > 0.05);
+    // Cap max layers
+    if (columns[i].length > MAX_LAYERS) {
+      // Merge bottom two layers
+      columns[i][0].thickness += columns[i][1].thickness;
+      columns[i].splice(1, 1);
+    }
+  }
+}
+
+// --- Rendering ---
+function layerColor(layer, depth, maxH) {
+  const base = LAYER_COLORS[layer.type] || { h: 0, s: 0, l: 50 };
+  // Darken with depth
+  const depthFactor = 1 - (depth / maxH) * 0.3;
+  // Age patina
+  const ageFactor = Math.min(layer.age / 4000, 1);
+  const l = base.l * depthFactor * (1 - ageFactor * 0.15);
+  const s = base.s * (1 - ageFactor * 0.2);
+  return `hsl(${base.h}, ${s}%, ${l}%)`;
+}
+
+function drawFossil(x, y, type, size) {
+  ctx.save();
+  ctx.translate(x, y);
+  ctx.fillStyle = 'rgba(240, 230, 200, 0.7)';
+  ctx.strokeStyle = 'rgba(200, 190, 160, 0.8)';
+  ctx.lineWidth = 0.5;
+
+  switch (type) {
+    case 'ammonite':
+      // Spiral shell
+      ctx.beginPath();
+      for (let a = 0; a < Math.PI * 6; a += 0.1) {
+        const r = a * size * 0.15;
+        ctx.lineTo(Math.cos(a) * r, Math.sin(a) * r);
+      }
+      ctx.stroke();
+      break;
+    case 'trilobite':
+      // Segmented body
+      ctx.beginPath();
+      ctx.ellipse(0, 0, size * 0.8, size * 0.4, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+      for (let s = -3; s <= 3; s++) {
+        ctx.beginPath();
+        ctx.moveTo(s * size * 0.2, -size * 0.4);
+        ctx.lineTo(s * size * 0.2, size * 0.4);
+        ctx.stroke();
+      }
+      break;
+    case 'fern':
+      // Frond
+      ctx.beginPath();
+      ctx.moveTo(0, -size);
+      ctx.lineTo(0, size);
+      ctx.stroke();
+      for (let s = -size; s < size; s += size * 0.3) {
+        ctx.beginPath();
+        ctx.moveTo(0, s);
+        ctx.quadraticCurveTo(size * 0.6, s + size * 0.1, size * 0.3, s + size * 0.25);
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.moveTo(0, s);
+        ctx.quadraticCurveTo(-size * 0.6, s + size * 0.1, -size * 0.3, s + size * 0.25);
+        ctx.stroke();
+      }
+      break;
+    case 'fish':
+      ctx.beginPath();
+      ctx.ellipse(0, 0, size, size * 0.35, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+      // Tail
+      ctx.beginPath();
+      ctx.moveTo(size, 0);
+      ctx.lineTo(size * 1.4, -size * 0.4);
+      ctx.lineTo(size * 1.4, size * 0.4);
+      ctx.closePath();
+      ctx.fill();
+      // Eye
+      ctx.beginPath();
+      ctx.arc(-size * 0.5, -size * 0.05, size * 0.08, 0, Math.PI * 2);
+      ctx.fillStyle = 'rgba(80, 70, 50, 0.8)';
+      ctx.fill();
+      break;
+    case 'shell':
+      ctx.beginPath();
+      ctx.arc(0, 0, size * 0.5, 0, Math.PI, true);
+      ctx.closePath();
+      ctx.fill();
+      ctx.stroke();
+      // Ridges
+      for (let r = 0.2; r < 0.5; r += 0.1) {
+        ctx.beginPath();
+        ctx.arc(0, 0, size * r, 0, Math.PI, true);
+        ctx.stroke();
+      }
+      break;
+    case 'bone':
+      ctx.fillRect(-size * 0.8, -size * 0.1, size * 1.6, size * 0.2);
+      ctx.beginPath();
+      ctx.arc(-size * 0.8, 0, size * 0.2, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.beginPath();
+      ctx.arc(size * 0.8, 0, size * 0.2, 0, Math.PI * 2);
+      ctx.fill();
+      break;
+  }
+  ctx.restore();
+}
+
+// Sky gradient
+function drawSky() {
+  const timeOfDay = (Math.sin(age * 0.02) + 1) * 0.5;
+  const grad = ctx.createLinearGradient(0, 0, 0, H * 0.4);
+
+  if (timeOfDay < 0.3) {
+    // Night
+    grad.addColorStop(0, '#0a0a1a');
+    grad.addColorStop(1, '#151525');
+  } else if (timeOfDay < 0.6) {
+    // Dawn/dusk
+    grad.addColorStop(0, '#1a1520');
+    grad.addColorStop(0.5, '#2a1a25');
+    grad.addColorStop(1, '#201820');
+  } else {
+    // Day
+    grad.addColorStop(0, '#15182a');
+    grad.addColorStop(1, '#1a2030');
+  }
+
+  ctx.fillStyle = grad;
+  ctx.fillRect(0, 0, W, H);
+}
+
+// Age counter display
+function drawAge() {
+  ctx.save();
+  ctx.fillStyle = 'rgba(200, 190, 170, 0.4)';
+  ctx.font = '12px monospace';
+  ctx.textAlign = 'right';
+  ctx.fillText(`${Math.floor(age)} Mya`, W - 15, 25);
+  ctx.fillText('click to erode', W - 15, 42);
+  ctx.restore();
+}
+
+// Water table
+function drawWater(surfaceY) {
+  const waterLevel = H * 0.82;
+  if (waterLevel < H) {
+    const grad = ctx.createLinearGradient(0, waterLevel - 10, 0, H);
+    grad.addColorStop(0, 'rgba(30, 60, 90, 0)');
+    grad.addColorStop(0.1, 'rgba(30, 60, 90, 0.15)');
+    grad.addColorStop(1, 'rgba(20, 40, 70, 0.3)');
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, waterLevel - 10, W, H - waterLevel + 10);
+  }
+}
+
+// Main render
+function render() {
+  drawSky();
+
+  const colWidth = W / COLS;
+  const maxH = 0;
+  let heights = new Float32Array(COLS);
+
+  // Find max height for scaling
+  let globalMax = 0;
+  for (let i = 0; i < COLS; i++) {
+    heights[i] = colHeight(columns[i]);
+    if (heights[i] > globalMax) globalMax = heights[i];
+  }
+
+  // Scale to fit screen with some margin
+  const scale = (H * 0.75) / Math.max(globalMax, 1);
+  const baseY = H * 0.92;
+
+  // Draw columns
+  for (let i = 0; i < COLS; i++) {
+    let y = baseY;
+
+    for (let j = 0; j < columns[i].length; j++) {
+      const layer = columns[i][j];
+      const layerH = layer.thickness * scale;
+      const topY = y - layerH;
+
+      ctx.fillStyle = layerColor(layer, baseY - y, globalMax * scale);
+      ctx.fillRect(i * colWidth, topY, colWidth + 0.5, layerH + 0.5);
+
+      // Draw fossils
+      for (const fossil of layer.fossils) {
+        const fx = i * colWidth + fossil.x * colWidth;
+        const fy = topY + fossil.y * layerH;
+        const fsize = Math.min(colWidth * 1.5, layerH * 0.4, 6);
+        if (fsize > 1.5) {
+          drawFossil(fx, fy, fossil.type, fsize);
+        }
+      }
+
+      // Subtle layer boundaries
+      if (j > 0 && layerH > 1) {
+        ctx.strokeStyle = 'rgba(0, 0, 0, 0.15)';
+        ctx.lineWidth = 0.5;
+        ctx.beginPath();
+        ctx.moveTo(i * colWidth, y);
+        ctx.lineTo((i + 1) * colWidth, y);
+        ctx.stroke();
+      }
+
+      y = topY;
+    }
+  }
+
+  // Surface line glow
+  ctx.beginPath();
+  ctx.moveTo(0, baseY - heights[0] * scale);
+  for (let i = 1; i < COLS; i++) {
+    ctx.lineTo(i * colWidth, baseY - heights[i] * scale);
+  }
+  ctx.strokeStyle = 'rgba(160, 150, 120, 0.3)';
+  ctx.lineWidth = 1;
+  ctx.stroke();
+
+  // Rain particles visualization near mouse
+  if (mouseDown) {
+    const rainX = mouseX * W;
+    for (let p = 0; p < 15; p++) {
+      const rx = rainX + (Math.random() - 0.5) * 80;
+      const ry = Math.random() * H * 0.5;
+      ctx.fillStyle = 'rgba(120, 160, 200, 0.3)';
+      ctx.fillRect(rx, ry, 1, 4 + Math.random() * 6);
+    }
+  }
+
+  drawWater();
+  drawAge();
+}
+
+// --- Simulation loop ---
+let lastTime = 0;
+let depositTimer = 0;
+let tectonicTimer = 0;
+
+init();
+
+function simulate(timestamp) {
+  const dt = Math.min((timestamp - lastTime) / 1000, 0.05);
+  lastTime = timestamp;
+
+  age += dt * 5; // 5 million years per second
+
+  // Deposit new layers periodically
+  depositTimer += dt;
+  if (depositTimer > 2.0) { // every 2 seconds
+    deposit();
+    depositTimer = 0;
+  }
+
+  // Tectonic events
+  tectonicTimer += dt;
+  if (tectonicTimer > 5.0) {
+    const event = Math.random();
+    if (event < 0.4) {
+      tectonicFold();
+    } else if (event < 0.7) {
+      fault();
+    } else {
+      volcanicIntrusion();
+    }
+    tectonicTimer = 0;
+  }
+
+  // Continuous erosion
+  erode();
+  erode(); // double pass for smoother results
+
+  // Cleanup
+  if (Math.random() < 0.1) cleanLayers();
+
+  render();
+  requestAnimationFrame(simulate);
+}
+
+requestAnimationFrame(simulate);
+</script>
+</body>
+</html>

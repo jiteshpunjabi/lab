@@ -1,0 +1,291 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Ulam Spiral</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { background: #050510; overflow: hidden; width: 1280px; height: 720px; }
+canvas { display: block; }
+#info {
+  position: fixed; bottom: 14px; left: 16px;
+  color: rgba(200,200,240,0.45); font: 11px monospace;
+  pointer-events: none; z-index: 10;
+  letter-spacing: 0.5px;
+}
+#stats {
+  position: fixed; top: 12px; left: 16px;
+  color: rgba(200,200,240,0.35); font: 11px monospace;
+  pointer-events: none; z-index: 10;
+}
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="info">ULAM SPIRAL -- primes arrange themselves into lines no one can fully explain</div>
+<div id="stats"></div>
+<script>
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d');
+const W = 1280, H = 720;
+canvas.width = W; canvas.height = H;
+
+// Sieve of Eratosthenes
+const MAX_N = 160000;
+const isPrime = new Uint8Array(MAX_N + 1);
+isPrime.fill(1);
+isPrime[0] = isPrime[1] = 0;
+for (let i = 2; i * i <= MAX_N; i++) {
+  if (isPrime[i]) for (let j = i * i; j <= MAX_N; j += i) isPrime[j] = 0;
+}
+
+// Generate spiral coordinates
+const dx = [1, 0, -1, 0];
+const dy = [0, -1, 0, 1];
+const spiralX = new Int16Array(MAX_N + 1);
+const spiralY = new Int16Array(MAX_N + 1);
+
+let x = 0, y = 0, dir = 0, steps = 1, stepCount = 0, turnCount = 0;
+spiralX[1] = 0; spiralY[1] = 0;
+for (let n = 2; n <= MAX_N; n++) {
+  x += dx[dir]; y += dy[dir];
+  spiralX[n] = x; spiralY[n] = y;
+  stepCount++;
+  if (stepCount === steps) {
+    stepCount = 0;
+    dir = (dir + 1) % 4;
+    turnCount++;
+    if (turnCount === 2) { turnCount = 0; steps++; }
+  }
+}
+
+// Spatial lookup
+const posToNumber = new Map();
+for (let n = 1; n <= MAX_N; n++) {
+  posToNumber.set(spiralX[n] * 10000 + spiralY[n], n);
+}
+
+// Pre-compute neighbor prime density for each prime
+const neighborDensity = new Uint8Array(MAX_N + 1);
+for (let n = 2; n <= MAX_N; n++) {
+  if (!isPrime[n]) continue;
+  const sx = spiralX[n], sy = spiralY[n];
+  let count = 0;
+  for (let di = -1; di <= 1; di++) {
+    for (let dj = -1; dj <= 1; dj++) {
+      if (di === 0 && dj === 0) continue;
+      const num = posToNumber.get((sx + di) * 10000 + (sy + dj));
+      if (num !== undefined && isPrime[num]) count++;
+    }
+  }
+  neighborDensity[n] = count;
+}
+
+// Pre-compute diagonal density in a wider window (shows the famous lines)
+const diagDensity = new Uint8Array(MAX_N + 1);
+for (let n = 2; n <= MAX_N; n++) {
+  if (!isPrime[n]) continue;
+  const sx = spiralX[n], sy = spiralY[n];
+  let count = 0;
+  // Check along both diagonals
+  for (let d = -3; d <= 3; d++) {
+    if (d === 0) continue;
+    const num1 = posToNumber.get((sx + d) * 10000 + (sy + d));
+    if (num1 !== undefined && isPrime[num1]) count++;
+    const num2 = posToNumber.get((sx + d) * 10000 + (sy - d));
+    if (num2 !== undefined && isPrime[num2]) count++;
+  }
+  diagDensity[n] = Math.min(count, 12);
+}
+
+// HSL to RGB
+function hsl2rgb(h, s, l) {
+  h = h / 360; s = s / 100; l = l / 100;
+  let r, g, b;
+  if (s === 0) { r = g = b = l; }
+  else {
+    const hue2rgb = (p, q, t) => {
+      if (t < 0) t += 1; if (t > 1) t -= 1;
+      if (t < 1/6) return p + (q - p) * 6 * t;
+      if (t < 1/2) return q;
+      if (t < 2/3) return p + (q - p) * (2/3 - t) * 6;
+      return p;
+    };
+    const q = l < 0.5 ? l * (1 + s) : l + s - l * s;
+    const p = 2 * l - q;
+    r = hue2rgb(p, q, h + 1/3);
+    g = hue2rgb(p, q, h);
+    b = hue2rgb(p, q, h - 1/3);
+  }
+  return [Math.round(r * 255), Math.round(g * 255), Math.round(b * 255)];
+}
+
+// State
+let viewX = 0, viewY = 0, zoom = 2.0;
+let currentN = 1;
+const growthRate = 2000;
+let animating = true;
+let targetZoom = zoom, targetX = 0, targetY = 0;
+let mouseX = W / 2, mouseY = H / 2;
+
+// Precompute prime colors
+const primeR = new Uint8Array(MAX_N + 1);
+const primeG = new Uint8Array(MAX_N + 1);
+const primeB = new Uint8Array(MAX_N + 1);
+
+for (let n = 2; n <= MAX_N; n++) {
+  if (!isPrime[n]) continue;
+  const sx = spiralX[n], sy = spiralY[n];
+  const dist = Math.sqrt(sx * sx + sy * sy);
+  const angle = Math.atan2(sy, sx);
+
+  // Hue: warm gold through cool blue based on diagonal alignment
+  // Primes on strong diagonals get warmer colors
+  const dd = diagDensity[n];
+  const nd = neighborDensity[n];
+
+  // Isolated primes: cool blue (220). Diagonal-dense primes: warm gold (40)
+  // This makes the diagonal lines glow amber/gold against a blue-purple field
+  const densityScore = dd + nd * 0.5;
+  const hue = densityScore > 5 ? 40 + (dist * 0.2) % 20 :
+              densityScore > 3 ? 30 + (dist * 0.3) % 40 :
+              densityScore > 1 ? 260 + (angle / Math.PI) * 30 :
+              220 + (dist * 0.5) % 40;
+  const sat = 65 + densityScore * 4;
+  const light = 45 + densityScore * 7;
+
+  const [r, g, b] = hsl2rgb(hue % 360, Math.min(sat, 95), Math.min(light, 85));
+  primeR[n] = r; primeG[n] = g; primeB[n] = b;
+}
+
+const imageData = ctx.createImageData(W, H);
+const pixels = imageData.data;
+
+function draw() {
+  viewX += (targetX - viewX) * 0.06;
+  viewY += (targetY - viewY) * 0.06;
+  zoom += (targetZoom - zoom) * 0.06;
+
+  if (animating && currentN < MAX_N) {
+    currentN = Math.min(currentN + growthRate, MAX_N);
+  }
+
+  // Clear pixel buffer
+  pixels.fill(0);
+  // Dark background
+  for (let i = 0; i < W * H * 4; i += 4) {
+    pixels[i] = 5; pixels[i+1] = 5; pixels[i+2] = 14; pixels[i+3] = 255;
+  }
+
+  const cx = W / 2 + viewX * zoom;
+  const cy = H / 2 + viewY * zoom;
+
+  // Draw composites as very faint dust (only when zoomed in enough)
+  if (zoom > 1.8) {
+    for (let n = 1; n <= currentN; n++) {
+      if (isPrime[n]) continue;
+      const px = Math.round(cx + spiralX[n] * zoom);
+      const py = Math.round(cy + spiralY[n] * zoom);
+      if (px < 0 || px >= W || py < 0 || py >= H) continue;
+      const idx = (py * W + px) * 4;
+      pixels[idx] = Math.min(255, pixels[idx] + 12);
+      pixels[idx+1] = Math.min(255, pixels[idx+1] + 10);
+      pixels[idx+2] = Math.min(255, pixels[idx+2] + 18);
+    }
+  }
+
+  // Draw primes with glow halos for high-density ones
+  for (let n = 2; n <= currentN; n++) {
+    if (!isPrime[n]) continue;
+    const px = cx + spiralX[n] * zoom;
+    const py = cy + spiralY[n] * zoom;
+    if (px < -10 || px >= W + 10 || py < -10 || py >= H + 10) continue;
+
+    const dd = diagDensity[n];
+    const nd = neighborDensity[n];
+    const intensity = 0.7 + dd * 0.1 + nd * 0.08;
+    const r = primeR[n], g = primeG[n], b = primeB[n];
+
+    // Glow radius based on diagonal density
+    const glowR = dd >= 4 ? 4 : dd >= 2 ? 3 : dd >= 1 ? 2 : 1;
+
+    if (glowR > 1) {
+      // Soft glow
+      for (let dy = -glowR; dy <= glowR; dy++) {
+        for (let dx = -glowR; dx <= glowR; dx++) {
+          const d2 = dx * dx + dy * dy;
+          if (d2 > glowR * glowR) continue;
+          const ix = Math.round(px + dx);
+          const iy = Math.round(py + dy);
+          if (ix < 0 || ix >= W || iy < 0 || iy >= H) continue;
+          const falloff = 1 - Math.sqrt(d2) / glowR;
+          const a = falloff * falloff * intensity * 0.55;
+          const idx = (iy * W + ix) * 4;
+          pixels[idx] = Math.min(255, pixels[idx] + r * a);
+          pixels[idx+1] = Math.min(255, pixels[idx+1] + g * a);
+          pixels[idx+2] = Math.min(255, pixels[idx+2] + b * a);
+        }
+      }
+    }
+
+    // Core pixel
+    const ix = Math.round(px), iy = Math.round(py);
+    if (ix >= 0 && ix < W && iy >= 0 && iy < H) {
+      const idx = (iy * W + ix) * 4;
+      const coreA = Math.min(1, intensity);
+      pixels[idx] = Math.min(255, pixels[idx] + r * coreA);
+      pixels[idx+1] = Math.min(255, pixels[idx+1] + g * coreA);
+      pixels[idx+2] = Math.min(255, pixels[idx+2] + b * coreA);
+    }
+  }
+
+  ctx.putImageData(imageData, 0, 0);
+
+  // Hover: show number info near mouse
+  if (zoom > 3) {
+    const gridX = Math.round((mouseX - cx) / zoom);
+    const gridY = Math.round((mouseY - cy) / zoom);
+    const num = posToNumber.get(gridX * 10000 + gridY);
+    if (num !== undefined && num <= currentN) {
+      ctx.fillStyle = isPrime[num] ? 'rgba(255,220,120,0.7)' : 'rgba(150,150,180,0.4)';
+      ctx.font = '10px monospace';
+      ctx.fillText(`${num}${isPrime[num] ? ' (prime)' : ''}`, mouseX + 8, mouseY - 6);
+    }
+  }
+
+  // Stats
+  const primeCount = (() => { let c = 0; for (let i = 2; i <= currentN; i++) if (isPrime[i]) c++; return c; })();
+  document.getElementById('stats').textContent =
+    `n: ${currentN.toLocaleString()}  |  primes: ${primeCount.toLocaleString()} (${(primeCount/currentN*100).toFixed(1)}%)  |  zoom: ${zoom.toFixed(1)}x`;
+
+  requestAnimationFrame(draw);
+}
+
+// Mouse interaction
+let dragging = false, lastMX = 0, lastMY = 0;
+canvas.addEventListener('mousedown', (e) => { dragging = true; lastMX = e.clientX; lastMY = e.clientY; });
+canvas.addEventListener('mousemove', (e) => {
+  mouseX = e.clientX; mouseY = e.clientY;
+  if (dragging) {
+    targetX += (e.clientX - lastMX) / zoom;
+    targetY += (e.clientY - lastMY) / zoom;
+    lastMX = e.clientX; lastMY = e.clientY;
+  }
+});
+canvas.addEventListener('mouseup', () => { dragging = false; });
+canvas.addEventListener('mouseleave', () => { dragging = false; });
+canvas.addEventListener('wheel', (e) => {
+  e.preventDefault();
+  targetZoom = Math.max(0.4, Math.min(25, targetZoom * (e.deltaY > 0 ? 0.9 : 1.12)));
+}, { passive: false });
+
+document.addEventListener('keydown', (e) => {
+  if (e.key === ' ') { animating = !animating; e.preventDefault(); }
+  if (e.key === 'r') { targetX = 0; targetY = 0; targetZoom = 2.0; }
+});
+
+draw();
+</script>
+</body>
+</html>

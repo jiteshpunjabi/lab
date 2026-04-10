@@ -1,0 +1,257 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>exp-016 — Morphogenesis</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+  background: #0a0612;
+  overflow: hidden;
+  width: 100vw;
+  height: 100vh;
+}
+canvas { display: block; width: 100vw; height: 100vh; }
+#info {
+  position: fixed;
+  bottom: 12px;
+  left: 12px;
+  color: rgba(255,255,255,0.35);
+  font: 11px/1.4 monospace;
+  pointer-events: none;
+  z-index: 10;
+}
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="info">click to seed · drag to paint · space to cycle patterns</div>
+<script>
+(() => {
+  const canvas = document.getElementById('c');
+  const ctx = canvas.getContext('2d');
+
+  const W = 256;
+  const H = 144;
+  canvas.width = 1280;
+  canvas.height = 720;
+
+  // Gray-Scott presets — each produces radically different Turing patterns
+  const presets = [
+    { name: 'coral',    f: 0.0545, k: 0.062  },
+    { name: 'mitosis',  f: 0.0367, k: 0.0649 },
+    { name: 'maze',     f: 0.029,  k: 0.057  },
+    { name: 'spots',    f: 0.030,  k: 0.062  },
+    { name: 'worms',    f: 0.078,  k: 0.061  },
+    { name: 'pulsing',  f: 0.014,  k: 0.054  },
+  ];
+  let presetIdx = 0;
+  let feed = presets[0].f;
+  let kill = presets[0].k;
+
+  const dA = 1.0;
+  const dB = 0.5;
+
+  // Double-buffered grids
+  let gridA, gridB, nextA, nextB;
+
+  // Offscreen canvas for compositing
+  const offCanvas = document.createElement('canvas');
+  offCanvas.width = W;
+  offCanvas.height = H;
+  const offCtx = offCanvas.getContext('2d');
+  const imageData = offCtx.createImageData(W, H);
+
+  function init() {
+    gridA = new Float32Array(W * H);
+    gridB = new Float32Array(W * H);
+    nextA = new Float32Array(W * H);
+    nextB = new Float32Array(W * H);
+
+    gridA.fill(1.0);
+    gridB.fill(0.0);
+
+    // Seed many circular patches to ensure visible patterns emerge
+    const count = 15;
+    for (let n = 0; n < count; n++) {
+      const cx = Math.floor(Math.random() * (W - 20) + 10);
+      const cy = Math.floor(Math.random() * (H - 20) + 10);
+      const r = Math.floor(Math.random() * 6 + 4);
+      for (let dy = -r; dy <= r; dy++) {
+        for (let dx = -r; dx <= r; dx++) {
+          if (dx * dx + dy * dy > r * r) continue;
+          const x = ((cx + dx) % W + W) % W;
+          const y = ((cy + dy) % H + H) % H;
+          const i = y * W + x;
+          gridA[i] = 0.0;
+          gridB[i] = 1.0;
+        }
+      }
+    }
+
+    // Also seed a large central region for guaranteed visibility
+    const ccx = W / 2, ccy = H / 2;
+    for (let dy = -15; dy <= 15; dy++) {
+      for (let dx = -20; dx <= 20; dx++) {
+        if (dx * dx + dy * dy > 300) continue;
+        const x = ((ccx + dx) % W + W) % W;
+        const y = ((ccy + dy) % H + H) % H;
+        const i = y * W + x;
+        gridA[i] = 0.0;
+        gridB[i] = 1.0;
+      }
+    }
+  }
+
+  function seedAt(screenX, screenY, radius) {
+    const rect = canvas.getBoundingClientRect();
+    const nx = (screenX - rect.left) / rect.width;
+    const ny = (screenY - rect.top) / rect.height;
+    const cx = Math.floor(nx * W);
+    const cy = Math.floor(ny * H);
+    const r = radius || 5;
+    for (let dy = -r; dy <= r; dy++) {
+      for (let dx = -r; dx <= r; dx++) {
+        if (dx * dx + dy * dy > r * r) continue;
+        const x = ((cx + dx) % W + W) % W;
+        const y = ((cy + dy) % H + H) % H;
+        const i = y * W + x;
+        gridA[i] = 0.0;
+        gridB[i] = 1.0;
+      }
+    }
+  }
+
+  function step() {
+    const w = W, h = H;
+    for (let y = 0; y < h; y++) {
+      const ym = ((y - 1) + h) % h;
+      const yp = (y + 1) % h;
+      for (let x = 0; x < w; x++) {
+        const xm = ((x - 1) + w) % w;
+        const xp = (x + 1) % w;
+        const i = y * w + x;
+        const a = gridA[i];
+        const b = gridB[i];
+
+        // 9-point weighted Laplacian
+        const lA =
+          0.05 * gridA[ym * w + xm] + 0.2 * gridA[ym * w + x] + 0.05 * gridA[ym * w + xp] +
+          0.2  * gridA[y  * w + xm] - 1.0 * a                 + 0.2  * gridA[y  * w + xp] +
+          0.05 * gridA[yp * w + xm] + 0.2 * gridA[yp * w + x] + 0.05 * gridA[yp * w + xp];
+
+        const lB =
+          0.05 * gridB[ym * w + xm] + 0.2 * gridB[ym * w + x] + 0.05 * gridB[ym * w + xp] +
+          0.2  * gridB[y  * w + xm] - 1.0 * b                 + 0.2  * gridB[y  * w + xp] +
+          0.05 * gridB[yp * w + xm] + 0.2 * gridB[yp * w + x] + 0.05 * gridB[yp * w + xp];
+
+        const abb = a * b * b;
+        nextA[i] = a + dA * lA - abb + feed * (1.0 - a);
+        nextB[i] = b + dB * lB + abb - (kill + feed) * b;
+
+        if (nextA[i] < 0) nextA[i] = 0;
+        if (nextA[i] > 1) nextA[i] = 1;
+        if (nextB[i] < 0) nextB[i] = 0;
+        if (nextB[i] > 1) nextB[i] = 1;
+      }
+    }
+    // Swap
+    const tmpA = gridA; gridA = nextA; nextA = tmpA;
+    const tmpB = gridB; gridB = nextB; nextB = tmpB;
+  }
+
+  function render() {
+    const data = imageData.data;
+    const n = W * H;
+    for (let i = 0; i < n; i++) {
+      const b = gridB[i];
+      const p = i << 2;
+
+      // Vivid biological palette based on B concentration
+      let r, g, bl;
+      if (b < 0.12) {
+        // Deep indigo ocean
+        const s = b / 0.12;
+        r  = 10 + s * 15  | 0;
+        g  = 6  + s * 30  | 0;
+        bl = 25 + s * 55  | 0;
+      } else if (b < 0.25) {
+        // Indigo -> electric teal
+        const s = (b - 0.12) / 0.13;
+        r  = 25 - s * 10  | 0;
+        g  = 36 + s * 100 | 0;
+        bl = 80 + s * 80  | 0;
+      } else if (b < 0.42) {
+        // Teal -> vivid magenta/coral
+        const s = (b - 0.25) / 0.17;
+        r  = 15  + s * 220 | 0;
+        g  = 136 - s * 80  | 0;
+        bl = 160 - s * 50  | 0;
+      } else if (b < 0.65) {
+        // Coral/magenta -> hot orange-pink
+        const s = (b - 0.42) / 0.23;
+        r  = 235 + s * 20  | 0;
+        g  = 56  + s * 90  | 0;
+        bl = 110 - s * 70  | 0;
+      } else {
+        // Hot -> luminous golden
+        const s = Math.min((b - 0.65) / 0.35, 1.0);
+        r  = 255;
+        g  = 146 + s * 100 | 0;
+        bl = 40  + s * 170 | 0;
+      }
+
+      data[p]     = r > 255 ? 255 : r;
+      data[p + 1] = g > 255 ? 255 : g;
+      data[p + 2] = bl > 255 ? 255 : bl;
+      data[p + 3] = 255;
+    }
+
+    offCtx.putImageData(imageData, 0, 0);
+
+    // Smooth upscale for organic look
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = 'high';
+    ctx.drawImage(offCanvas, 0, 0, canvas.width, canvas.height);
+  }
+
+  // Mouse interaction
+  let mouseDown = false;
+  canvas.addEventListener('mousedown', (e) => {
+    mouseDown = true;
+    seedAt(e.clientX, e.clientY, 6);
+  });
+  canvas.addEventListener('mousemove', (e) => {
+    if (!mouseDown) return;
+    seedAt(e.clientX, e.clientY, 4);
+  });
+  canvas.addEventListener('mouseup', () => { mouseDown = false; });
+  canvas.addEventListener('mouseleave', () => { mouseDown = false; });
+
+  // Space to cycle presets
+  document.addEventListener('keydown', (e) => {
+    if (e.code === 'Space') {
+      e.preventDefault();
+      presetIdx = (presetIdx + 1) % presets.length;
+      feed = presets[presetIdx].f;
+      kill = presets[presetIdx].k;
+      init();
+      document.getElementById('info').textContent =
+        `pattern: ${presets[presetIdx].name} · click to seed · drag to paint · space to cycle`;
+    }
+  });
+
+  // Animation loop — 10 sim steps per frame
+  function animate() {
+    for (let i = 0; i < 10; i++) step();
+    render();
+    requestAnimationFrame(animate);
+  }
+
+  init();
+  animate();
+})();
+</script>
+</body>
+</html>

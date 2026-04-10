@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>exp-029 — One Line</title>
+<style>
+* { margin: 0; padding: 0; }
+body { background: #fff; overflow: hidden; cursor: none; }
+canvas { display: block; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<script>
+const c = document.getElementById('c');
+const ctx = c.getContext('2d');
+let w, h, mx = 0.5, my = 0.5;
+
+function resize() {
+  w = c.width = innerWidth;
+  h = c.height = innerHeight;
+  ctx.fillStyle = '#fff';
+  ctx.fillRect(0, 0, w, h);
+}
+resize();
+addEventListener('resize', resize);
+addEventListener('mousemove', e => { mx = e.clientX / w; my = e.clientY / h; });
+
+let row = 0;
+
+function draw() {
+  const speed = 3;
+  for (let r = 0; r < speed; r++) {
+    const phi = row * 0.0191;
+    const freq1 = 0.005 + my * 0.004;
+    const freq2 = 0.002 + mx * 0.003;
+    ctx.beginPath();
+    for (let x = 0; x <= w; x++) {
+      const y = h / 2
+        + Math.sin(x * freq1 + phi) * Math.sin(x * freq2 - phi * 0.618) * h * 0.4;
+      if (x === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+    }
+    ctx.strokeStyle = 'rgba(40, 20, 0, 0.06)';
+    ctx.lineWidth = 0.5;
+    ctx.stroke();
+    row++;
+  }
+  requestAnimationFrame(draw);
+}
+draw();
+</script>
+</body>
+</html>
