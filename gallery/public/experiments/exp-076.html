@@ -1,0 +1,467 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=1280,height=720">
+<title>Quorum Sensing</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { width: 1280px; height: 720px; overflow: hidden; background: #020008; }
+canvas { display: block; }
+#info {
+  position: absolute; top: 16px; left: 16px;
+  color: rgba(120, 200, 255, 0.7); font: 14px monospace;
+  pointer-events: none; z-index: 10;
+  text-shadow: 0 0 8px rgba(0, 150, 255, 0.4);
+}
+#quorum-bar {
+  position: absolute; bottom: 24px; left: 50%; transform: translateX(-50%);
+  width: 400px; height: 6px; background: rgba(255,255,255,0.08);
+  border-radius: 3px; overflow: hidden; z-index: 10;
+}
+#quorum-fill {
+  height: 100%; width: 0%; border-radius: 3px;
+  background: linear-gradient(90deg, #1a3a5c, #00ccff, #00ffaa);
+  transition: width 0.3s ease, background 0.5s;
+}
+#quorum-label {
+  position: absolute; bottom: 34px; left: 50%; transform: translateX(-50%);
+  color: rgba(100, 180, 255, 0.5); font: 11px monospace;
+  pointer-events: none; z-index: 10;
+}
+#hint {
+  position: absolute; bottom: 50px; left: 50%; transform: translateX(-50%);
+  color: rgba(100, 180, 255, 0.3); font: 12px monospace;
+  pointer-events: none; z-index: 10;
+}
+</style>
+</head>
+<body>
+<div id="info">
+  <div id="pop">Population: 0</div>
+  <div id="signal">Signal Density: 0%</div>
+  <div id="phase">Phase: Solitary</div>
+</div>
+<div id="quorum-label">QUORUM THRESHOLD</div>
+<div id="quorum-bar"><div id="quorum-fill"></div></div>
+<div id="hint">click to seed bacteria</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/tone/14.8.49/Tone.js"></script>
+<script>
+(function() {
+  // Scene setup
+  const scene = new THREE.Scene();
+  scene.fog = new THREE.FogExp2(0x020008, 0.015);
+  const camera = new THREE.PerspectiveCamera(60, 1280/720, 0.1, 200);
+  camera.position.set(0, 12, 28);
+  camera.lookAt(0, 0, 0);
+  const renderer = new THREE.WebGLRenderer({ antialias: true });
+  renderer.setSize(1280, 720);
+  renderer.setPixelRatio(1);
+  document.body.appendChild(renderer.domElement);
+
+  // Lighting
+  const ambient = new THREE.AmbientLight(0x0a0a2a, 0.5);
+  scene.add(ambient);
+  const pointLight = new THREE.PointLight(0x3399ff, 2.0, 80);
+  pointLight.position.set(0, 15, 0);
+  scene.add(pointLight);
+  const pointLight2 = new THREE.PointLight(0x00ccaa, 1.0, 60);
+  pointLight2.position.set(-10, 8, 10);
+  scene.add(pointLight2);
+
+  // Petri dish (ground plane)
+  const dishGeo = new THREE.CircleGeometry(18, 64);
+  const dishMat = new THREE.MeshPhongMaterial({
+    color: 0x060612, transparent: true, opacity: 0.6,
+    emissive: 0x020210, emissiveIntensity: 0.3
+  });
+  const dish = new THREE.Mesh(dishGeo, dishMat);
+  dish.rotation.x = -Math.PI / 2;
+  dish.position.y = -0.5;
+  scene.add(dish);
+
+  // Dish rim
+  const rimGeo = new THREE.TorusGeometry(18, 0.15, 16, 64);
+  const rimMat = new THREE.MeshPhongMaterial({ color: 0x334466, emissive: 0x112233 });
+  const rim = new THREE.Mesh(rimGeo, rimMat);
+  rim.rotation.x = -Math.PI / 2;
+  rim.position.y = -0.5;
+  scene.add(rim);
+
+  // State
+  const QUORUM_THRESHOLD = 0.65;
+  let quorumReached = false;
+  let quorumTime = 0;
+  let signalDensity = 0;
+
+  // Bacteria
+  const bacteria = [];
+  const bacteriaGroup = new THREE.Group();
+  scene.add(bacteriaGroup);
+
+  // Signal molecules (floating particles)
+  const signalCount = 2000;
+  const signalGeo = new THREE.BufferGeometry();
+  const signalPositions = new Float32Array(signalCount * 3);
+  const signalColors = new Float32Array(signalCount * 3);
+  const signalSizes = new Float32Array(signalCount);
+  const signalVelocities = [];
+  for (let i = 0; i < signalCount; i++) {
+    signalPositions[i*3] = (Math.random()-0.5)*36;
+    signalPositions[i*3+1] = Math.random()*4 - 0.3;
+    signalPositions[i*3+2] = (Math.random()-0.5)*36;
+    signalColors[i*3] = 0; signalColors[i*3+1] = 0.3; signalColors[i*3+2] = 0.6;
+    signalSizes[i] = 0;
+    signalVelocities.push({
+      x: (Math.random()-0.5)*0.02,
+      y: (Math.random()-0.5)*0.01,
+      z: (Math.random()-0.5)*0.02
+    });
+  }
+  signalGeo.setAttribute('position', new THREE.BufferAttribute(signalPositions, 3));
+  signalGeo.setAttribute('color', new THREE.BufferAttribute(signalColors, 3));
+  signalGeo.setAttribute('size', new THREE.BufferAttribute(signalSizes, 1));
+
+  const signalMat = new THREE.PointsMaterial({
+    size: 0.2, vertexColors: true, transparent: true,
+    opacity: 0.8, blending: THREE.AdditiveBlending, depthWrite: false
+  });
+  const signalPoints = new THREE.Points(signalGeo, signalMat);
+  scene.add(signalPoints);
+
+  // Bacterium class
+  class Bacterium {
+    constructor(x, z) {
+      const geo = new THREE.SphereGeometry(0.4, 12, 12);
+      geo.scale(1, 0.6, 1.3);
+      const hue = 0.5 + Math.random()*0.1;
+      const color = new THREE.Color().setHSL(hue, 0.8, 0.45);
+      const emissive = new THREE.Color().setHSL(hue, 0.9, 0.25);
+      this.mat = new THREE.MeshPhongMaterial({
+        color, emissive, emissiveIntensity: 1.0,
+        transparent: true, opacity: 0.95
+      });
+      this.mesh = new THREE.Mesh(geo, this.mat);
+      this.mesh.position.set(x, 0, z);
+      this.mesh.rotation.y = Math.random() * Math.PI * 2;
+      bacteriaGroup.add(this.mesh);
+
+      // Glow sprite
+      const spriteMat = new THREE.SpriteMaterial({
+        color: 0x00ddff, transparent: true, opacity: 0.3,
+        blending: THREE.AdditiveBlending
+      });
+      this.glow = new THREE.Sprite(spriteMat);
+      this.glow.scale.set(2.0, 2.0, 1);
+      this.mesh.add(this.glow);
+
+      this.vx = (Math.random()-0.5)*0.02;
+      this.vz = (Math.random()-0.5)*0.02;
+      this.signalOutput = 0;
+      this.activated = false;
+      this.activationTime = 0;
+      this.baseHue = hue;
+      this.wobblePhase = Math.random() * Math.PI * 2;
+      this.signalSlots = Math.floor(Math.random()*3) + 1;
+    }
+
+    update(t, dt) {
+      // Random walk
+      this.vx += (Math.random()-0.5)*0.005;
+      this.vz += (Math.random()-0.5)*0.005;
+      this.vx *= 0.98; this.vz *= 0.98;
+      this.mesh.position.x += this.vx;
+      this.mesh.position.z += this.vz;
+
+      // Contain within dish
+      const dist = Math.sqrt(this.mesh.position.x**2 + this.mesh.position.z**2);
+      if (dist > 16) {
+        this.mesh.position.x *= 15/dist;
+        this.mesh.position.z *= 15/dist;
+        this.vx *= -0.5; this.vz *= -0.5;
+      }
+
+      // Wobble
+      this.mesh.position.y = Math.sin(t*2 + this.wobblePhase)*0.1;
+      this.mesh.rotation.y += 0.005;
+
+      // Signal production (proportional to local density)
+      const neighbors = this.countNeighbors();
+      this.signalOutput = Math.min(1, neighbors / 8);
+
+      // Activation based on signal density
+      if (signalDensity > QUORUM_THRESHOLD && !this.activated) {
+        this.activated = true;
+        this.activationTime = t;
+      }
+
+      // Visual response to activation
+      if (this.activated) {
+        const since = t - this.activationTime;
+        const glow = Math.min(1, since * 0.5);
+        const pulse = 0.7 + 0.3 * Math.sin(t * 3 + this.wobblePhase);
+        const intensity = glow * pulse;
+
+        this.mat.emissive.setHSL(0.48 + Math.sin(t+this.wobblePhase)*0.05, 0.9, intensity * 0.5);
+        this.mat.emissiveIntensity = intensity * 2;
+        this.glow.material.opacity = intensity * 0.5;
+        this.glow.material.color.setHSL(0.5 + Math.sin(t*0.5)*0.1, 1, 0.6);
+        this.glow.scale.setScalar(1.5 + intensity * 1.5);
+      } else {
+        // Pre-quorum pulse based on local density
+        const pulse = this.signalOutput * 0.3 * (0.5 + 0.5*Math.sin(t*2 + this.wobblePhase));
+        this.mat.emissiveIntensity = 1.0 + pulse;
+        this.glow.material.opacity = 0.2 + this.signalOutput * 0.2;
+      }
+    }
+
+    countNeighbors() {
+      let count = 0;
+      const px = this.mesh.position.x, pz = this.mesh.position.z;
+      for (const b of bacteria) {
+        if (b === this) continue;
+        const dx = b.mesh.position.x - px;
+        const dz = b.mesh.position.z - pz;
+        if (dx*dx + dz*dz < 16) count++;
+      }
+      return count;
+    }
+  }
+
+  // Spawn initial bacteria
+  function spawnBacterium(x, z) {
+    if (bacteria.length >= 200) return;
+    const b = new Bacterium(x || (Math.random()-0.5)*20, z || (Math.random()-0.5)*20);
+    bacteria.push(b);
+  }
+
+  // Start with a moderate colony -- clusters for visual interest
+  for (let i = 0; i < 30; i++) spawnBacterium();
+  // Seed a dense cluster to show quorum building
+  for (let i = 0; i < 20; i++) {
+    spawnBacterium((Math.random()-0.5)*8, (Math.random()-0.5)*8);
+  }
+
+  // Click to add bacteria
+  const raycaster = new THREE.Raycaster();
+  const mouse = new THREE.Vector2();
+  renderer.domElement.addEventListener('click', (e) => {
+    mouse.x = (e.clientX / 1280) * 2 - 1;
+    mouse.y = -(e.clientY / 720) * 2 + 1;
+    raycaster.setFromCamera(mouse, camera);
+    const plane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
+    const pt = new THREE.Vector3();
+    raycaster.ray.intersectPlane(plane, pt);
+    if (pt) {
+      for (let i = 0; i < 5; i++) {
+        spawnBacterium(pt.x + (Math.random()-0.5)*3, pt.z + (Math.random()-0.5)*3);
+      }
+    }
+  });
+
+  // Audio setup (lazy init on interaction)
+  let audioStarted = false;
+  let synths = [];
+  let chorusSynth, noiseSynth;
+
+  function initAudio() {
+    if (audioStarted) return;
+    audioStarted = true;
+    Tone.start();
+
+    // Individual bacterium voices -- soft sine tones
+    for (let i = 0; i < 6; i++) {
+      const synth = new Tone.Synth({
+        oscillator: { type: 'sine' },
+        envelope: { attack: 2, decay: 1, sustain: 0.3, release: 2 }
+      }).toDestination();
+      synth.volume.value = -30;
+      synths.push(synth);
+    }
+
+    // Chorus synth for quorum activation
+    chorusSynth = new Tone.PolySynth(Tone.Synth, {
+      oscillator: { type: 'sine' },
+      envelope: { attack: 3, decay: 2, sustain: 0.8, release: 4 }
+    }).toDestination();
+    chorusSynth.volume.value = -25;
+
+    // Background hum
+    noiseSynth = new Tone.Noise('brown').toDestination();
+    noiseSynth.volume.value = -40;
+    noiseSynth.start();
+  }
+
+  document.addEventListener('click', initAudio, { once: true });
+
+  // Auto-spawn timer
+  let spawnTimer = 0;
+
+  // Audio state
+  let lastNote = 0;
+  let chorusPlaying = false;
+  const pentatonic = ['C3','D3','E3','G3','A3','C4','D4','E4','G4','A4'];
+
+  // Camera rotation
+  let camAngle = 0;
+
+  // UI elements
+  const popEl = document.getElementById('pop');
+  const signalEl = document.getElementById('signal');
+  const phaseEl = document.getElementById('phase');
+  const quorumFill = document.getElementById('quorum-fill');
+  const hintEl = document.getElementById('hint');
+
+  // Animation loop
+  let prevTime = performance.now();
+  function animate() {
+    requestAnimationFrame(animate);
+    const now = performance.now();
+    const dt = Math.min((now - prevTime) / 1000, 0.05);
+    prevTime = now;
+    const t = now / 1000;
+
+    // Auto-spawn (slow growth)
+    spawnTimer += dt;
+    if (spawnTimer > 1.2 && bacteria.length < 150) {
+      spawnTimer = 0;
+      // Binary fission near existing bacteria
+      if (bacteria.length > 0) {
+        const parent = bacteria[Math.floor(Math.random()*bacteria.length)];
+        spawnBacterium(
+          parent.mesh.position.x + (Math.random()-0.5)*2,
+          parent.mesh.position.z + (Math.random()-0.5)*2
+        );
+      }
+    }
+
+    // Calculate signal density
+    const maxDensity = 100; // bacteria needed for full signal saturation
+    const rawDensity = bacteria.length / maxDensity;
+    signalDensity += (Math.min(1, rawDensity) - signalDensity) * dt * 0.5;
+
+    // Update quorum state
+    if (signalDensity > QUORUM_THRESHOLD && !quorumReached) {
+      quorumReached = true;
+      quorumTime = t;
+    }
+
+    // Update bacteria
+    for (const b of bacteria) b.update(t, dt);
+
+    // Update signal molecules
+    const positions = signalGeo.attributes.position.array;
+    const colors = signalGeo.attributes.color.array;
+    const sizes = signalGeo.attributes.size.array;
+    const activeSignals = Math.floor(signalDensity * signalCount);
+
+    for (let i = 0; i < signalCount; i++) {
+      if (i < activeSignals) {
+        // Move signal molecules
+        positions[i*3] += signalVelocities[i].x + Math.sin(t + i) * 0.005;
+        positions[i*3+1] += signalVelocities[i].y;
+        positions[i*3+2] += signalVelocities[i].z + Math.cos(t + i) * 0.005;
+
+        // Contain
+        const sd = Math.sqrt(positions[i*3]**2 + positions[i*3+2]**2);
+        if (sd > 17) {
+          positions[i*3] *= 16/sd;
+          positions[i*3+2] *= 16/sd;
+        }
+        positions[i*3+1] = Math.max(-0.3, Math.min(3, positions[i*3+1]));
+
+        sizes[i] = quorumReached ?
+          0.15 + 0.1 * Math.sin(t*4 + i) :
+          0.08 + 0.04 * Math.sin(t*2 + i);
+
+        // Color shift with quorum
+        if (quorumReached) {
+          const pulse = 0.5 + 0.5 * Math.sin(t*2 + i*0.1);
+          colors[i*3] = 0.1 * pulse;
+          colors[i*3+1] = 0.8 * pulse + 0.2;
+          colors[i*3+2] = 1.0;
+        } else {
+          colors[i*3] = 0;
+          colors[i*3+1] = 0.2 + signalDensity * 0.4;
+          colors[i*3+2] = 0.4 + signalDensity * 0.4;
+        }
+      } else {
+        sizes[i] = 0;
+      }
+    }
+    signalGeo.attributes.position.needsUpdate = true;
+    signalGeo.attributes.color.needsUpdate = true;
+    signalGeo.attributes.size.needsUpdate = true;
+
+    // Update lighting based on quorum
+    if (quorumReached) {
+      const since = t - quorumTime;
+      const glow = Math.min(1, since * 0.2);
+      const pulse = 0.7 + 0.3 * Math.sin(t * 1.5);
+      pointLight.intensity = 0.8 + glow * 2 * pulse;
+      pointLight.color.setHSL(0.5, 0.8, 0.5 + glow * 0.3);
+      ambient.intensity = 0.5 + glow * 0.5;
+      scene.fog.density = 0.015 - glow * 0.008;
+      dish.material.emissive.setHSL(0.55, 0.5, glow * 0.15);
+
+      // Dish edge glow
+      rimMat.emissive.setHSL(0.5, 0.8, glow * 0.4 * pulse);
+    }
+
+    // Audio -- individual whispers
+    if (audioStarted && t - lastNote > 3 && !quorumReached) {
+      const synthIdx = Math.floor(Math.random() * synths.length);
+      const noteIdx = Math.floor(Math.random() * 5); // lower notes pre-quorum
+      synths[synthIdx].volume.value = -35 + signalDensity * 15;
+      synths[synthIdx].triggerAttackRelease(pentatonic[noteIdx], '2n');
+      lastNote = t;
+    }
+
+    // Audio -- quorum chorus
+    if (audioStarted && quorumReached && !chorusPlaying) {
+      chorusPlaying = true;
+      noiseSynth.volume.value = -30;
+      // Staggered chord
+      setTimeout(() => chorusSynth.triggerAttack(['C3','E3','G3','C4']), 0);
+      setTimeout(() => chorusSynth.triggerAttack(['D4','G4']), 2000);
+      setTimeout(() => chorusSynth.triggerAttack(['E4','A4']), 4000);
+    }
+
+    // Continuous post-quorum tones
+    if (audioStarted && quorumReached && t - lastNote > 1.5) {
+      const synthIdx = Math.floor(Math.random() * synths.length);
+      const noteIdx = 5 + Math.floor(Math.random() * 5); // higher notes post-quorum
+      synths[synthIdx].volume.value = -22;
+      synths[synthIdx].triggerAttackRelease(pentatonic[noteIdx], '1n');
+      lastNote = t;
+    }
+
+    // Camera gentle orbit
+    camAngle += dt * 0.05;
+    camera.position.x = Math.sin(camAngle) * 28;
+    camera.position.z = Math.cos(camAngle) * 28;
+    camera.position.y = 12 + Math.sin(t * 0.3) * 2;
+    camera.lookAt(0, 0, 0);
+
+    // UI updates
+    popEl.textContent = `Population: ${bacteria.length}`;
+    signalEl.textContent = `Signal Density: ${(signalDensity*100).toFixed(1)}%`;
+    phaseEl.textContent = `Phase: ${quorumReached ? 'QUORUM ACTIVATED' : signalDensity > 0.4 ? 'Approaching Threshold' : 'Solitary'}`;
+    quorumFill.style.width = `${Math.min(100, signalDensity/QUORUM_THRESHOLD*100)}%`;
+
+    if (quorumReached) {
+      quorumFill.style.background = 'linear-gradient(90deg, #00ccff, #00ffaa, #80ffdd)';
+      phaseEl.style.color = '#00ffcc';
+      hintEl.style.display = 'none';
+    }
+
+    renderer.render(scene, camera);
+  }
+
+  animate();
+})();
+</script>
+</body>
+</html>

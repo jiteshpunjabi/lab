@@ -1,0 +1,382 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<title>Telegraph Murmuration</title>
+<style>
+  html, body {
+    margin: 0;
+    padding: 0;
+    background: #0b0614;
+    overflow: hidden;
+    font-family: 'Courier New', monospace;
+    color: #f4d48a;
+  }
+  canvas { display: block; }
+  #hud {
+    position: absolute;
+    top: 14px;
+    left: 18px;
+    font-size: 13px;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: #f4d48a;
+    text-shadow: 0 0 8px rgba(244, 212, 138, 0.55);
+    user-select: none;
+  }
+  #hud .label { opacity: 0.55; font-size: 11px; }
+  #hud .morse { font-size: 18px; letter-spacing: 0.25em; color: #ffe9a8; }
+  #hud .word  { font-size: 22px; letter-spacing: 0.18em; margin-top: 4px; color: #fff4c4; text-shadow: 0 0 14px rgba(255, 220, 120, 0.9); }
+  #sub {
+    position: absolute;
+    bottom: 16px;
+    left: 18px;
+    font-size: 11px;
+    opacity: 0.6;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+  }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="hud">
+  <div class="label">transmission</div>
+  <div class="morse" id="morse">&nbsp;</div>
+  <div class="word"  id="word">&nbsp;</div>
+</div>
+<div id="sub">a flock of starlings remembers an old telegraph &middot; click to send a pulse</div>
+<script>
+(() => {
+  const canvas = document.getElementById('c');
+  const ctx = canvas.getContext('2d');
+  const W = 1280, H = 720;
+  canvas.width = W;
+  canvas.height = H;
+
+  const MORSE = {
+    A:'.-',     B:'-...',   C:'-.-.',   D:'-..',    E:'.',
+    F:'..-.',   G:'--.',    H:'....',   I:'..',     J:'.---',
+    K:'-.-',    L:'.-..',   M:'--',     N:'-.',     O:'---',
+    P:'.--.',   Q:'--.-',   R:'.-.',    S:'...',    T:'-',
+    U:'..-',    V:'...-',   W:'.--',    X:'-..-',   Y:'-.--',
+    Z:'--..'
+  };
+
+  const MESSAGE = 'HELLO DARKNESS STOP OLD FRIEND STOP';
+  const UNIT = 220;
+  const timeline = [];
+  for (const ch of MESSAGE) {
+    if (ch === ' ') {
+      timeline.push({ kind: 'word-gap', dur: UNIT * 7, letter: ' ', symbol: '/' });
+      continue;
+    }
+    const code = MORSE[ch];
+    if (!code) continue;
+    for (let i = 0; i < code.length; i++) {
+      const s = code[i];
+      if (s === '.') timeline.push({ kind: 'dot', dur: UNIT, letter: ch, symbol: '.' });
+      else timeline.push({ kind: 'dash', dur: UNIT * 3, letter: ch, symbol: '-' });
+      if (i < code.length - 1) timeline.push({ kind: 'gap', dur: UNIT, letter: ch, symbol: '' });
+    }
+    timeline.push({ kind: 'letter-gap', dur: UNIT * 3, letter: ch, symbol: '' });
+  }
+  const totalDur = timeline.reduce((a, b) => a + b.dur, 0);
+
+  function getBeat(t) {
+    let acc = 0;
+    const tt = t % totalDur;
+    for (let i = 0; i < timeline.length; i++) {
+      const b = timeline[i];
+      if (tt < acc + b.dur) {
+        const local = (tt - acc) / b.dur;
+        return { beat: b, idx: i, local };
+      }
+      acc += b.dur;
+    }
+    return { beat: timeline[timeline.length - 1], idx: timeline.length - 1, local: 1 };
+  }
+
+  const N = 280;
+  const boids = [];
+  for (let i = 0; i < N; i++) {
+    boids.push({
+      x: Math.random() * W,
+      y: Math.random() * H * 0.55 + H * 0.1,
+      vx: (Math.random() - 0.5) * 2,
+      vy: (Math.random() - 0.5) * 2,
+      phase: Math.random() * Math.PI * 2,
+    });
+  }
+
+  const CELL = 40;
+  function hash(x, y) { return (x|0) + ',' + (y|0); }
+  function buildGrid() {
+    const g = new Map();
+    for (let i = 0; i < boids.length; i++) {
+      const b = boids[i];
+      const k = hash(b.x / CELL, b.y / CELL);
+      if (!g.has(k)) g.set(k, []);
+      g.get(k).push(i);
+    }
+    return g;
+  }
+
+  const BASELINE_Y = H * 0.46;
+
+  const pulses = [];
+  canvas.addEventListener('click', (e) => {
+    const r = canvas.getBoundingClientRect();
+    const x = (e.clientX - r.left) * (W / r.width);
+    const y = (e.clientY - r.top)  * (H / r.height);
+    pulses.push({ x, y, t: 0 });
+  });
+
+  const morseEl = document.getElementById('morse');
+  const wordEl  = document.getElementById('word');
+
+  let start = performance.now();
+  let lastBeatIdx = -1;
+  let morseBuffer = '';
+
+  function frame(now) {
+    const t = now - start;
+    const { beat, idx, local } = getBeat(t);
+
+    if (idx !== lastBeatIdx) {
+      lastBeatIdx = idx;
+      if (beat.kind === 'dot' || beat.kind === 'dash') {
+        morseBuffer += beat.symbol;
+      } else if (beat.kind === 'letter-gap') {
+        morseBuffer += ' ';
+      } else if (beat.kind === 'word-gap') {
+        morseBuffer += '/ ';
+      }
+      if (morseBuffer.length > 28) morseBuffer = morseBuffer.slice(-28);
+      morseEl.textContent = morseBuffer || '\u00a0';
+
+      let decoded = '';
+      for (let i = 0; i <= idx; i++) {
+        const b = timeline[i];
+        if (b.kind === 'word-gap') decoded += ' ';
+        else if (b.kind === 'letter-gap') decoded += b.letter === ' ' ? '' : b.letter;
+      }
+      if (decoded.length > 22) decoded = decoded.slice(-22);
+      wordEl.textContent = decoded || '\u00a0';
+    }
+
+    const targetCenterX = W * 0.5;
+    const targetCenterY = BASELINE_Y;
+
+    let pulseStrength = 0;
+    let shape = 'drift';
+    if (beat.kind === 'dot') { shape = 'dot'; pulseStrength = Math.sin(local * Math.PI); }
+    else if (beat.kind === 'dash') { shape = 'dash'; pulseStrength = Math.sin(local * Math.PI); }
+
+    // Trail-retaining background
+    ctx.fillStyle = 'rgba(11, 6, 20, 0.22)';
+    ctx.fillRect(0, 0, W, H);
+
+    // Stars
+    for (let i = 0; i < 48; i++) {
+      const sx = (i * 173.17 + 40) % W;
+      const sy = (i * 91.31 + 20) % (H * 0.55);
+      const tw = 0.4 + 0.6 * Math.sin(t * 0.002 + i);
+      ctx.fillStyle = `rgba(255, 240, 190, ${0.08 + tw * 0.12})`;
+      ctx.fillRect(sx, sy, 1.8, 1.8);
+    }
+
+    // Telegraph wires
+    ctx.strokeStyle = 'rgba(170, 120, 70, 0.55)';
+    ctx.lineWidth = 1.4;
+    for (let w = 0; w < 3; w++) {
+      const wy = BASELINE_Y + 100 + w * 11;
+      ctx.beginPath();
+      for (let x = 0; x <= W; x += 20) {
+        const sag = Math.sin(x / 110) * 3;
+        if (x === 0) ctx.moveTo(x, wy + sag);
+        else ctx.lineTo(x, wy + sag);
+      }
+      ctx.stroke();
+    }
+
+    // Poles
+    for (let px = 120; px < W; px += 240) {
+      ctx.strokeStyle = 'rgba(180, 130, 80, 0.7)';
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.moveTo(px, BASELINE_Y + 98);
+      ctx.lineTo(px, BASELINE_Y + 210);
+      ctx.stroke();
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(px - 24, BASELINE_Y + 114);
+      ctx.lineTo(px + 24, BASELINE_Y + 114);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(px - 18, BASELINE_Y + 126);
+      ctx.lineTo(px + 18, BASELINE_Y + 126);
+      ctx.stroke();
+    }
+
+    // Horizon gradient
+    const grad = ctx.createLinearGradient(0, BASELINE_Y + 100, 0, H);
+    grad.addColorStop(0, 'rgba(70, 30, 55, 0.55)');
+    grad.addColorStop(1, 'rgba(12, 6, 24, 1)');
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, BASELINE_Y + 100, W, H - (BASELINE_Y + 100));
+
+    // Moon-ish glow behind flock
+    const moonGrad = ctx.createRadialGradient(targetCenterX, targetCenterY, 10, targetCenterX, targetCenterY, 340);
+    moonGrad.addColorStop(0, 'rgba(80, 40, 90, 0.18)');
+    moonGrad.addColorStop(1, 'rgba(20, 10, 40, 0)');
+    ctx.fillStyle = moonGrad;
+    ctx.beginPath();
+    ctx.arc(targetCenterX, targetCenterY, 340, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Update boids
+    const grid = buildGrid();
+    for (let i = 0; i < boids.length; i++) {
+      const b = boids[i];
+      let sepX = 0, sepY = 0, aliX = 0, aliY = 0, cohX = 0, cohY = 0, nCount = 0;
+      const gx = (b.x / CELL) | 0;
+      const gy = (b.y / CELL) | 0;
+      for (let dx = -1; dx <= 1; dx++) {
+        for (let dy = -1; dy <= 1; dy++) {
+          const arr = grid.get(hash(gx + dx, gy + dy));
+          if (!arr) continue;
+          for (const j of arr) {
+            if (j === i) continue;
+            const o = boids[j];
+            const ddx = b.x - o.x;
+            const ddy = b.y - o.y;
+            const d2 = ddx * ddx + ddy * ddy;
+            if (d2 < 900 && d2 > 0) {
+              sepX += ddx / d2 * 18;
+              sepY += ddy / d2 * 18;
+              aliX += o.vx;
+              aliY += o.vy;
+              cohX += o.x;
+              cohY += o.y;
+              nCount++;
+            }
+          }
+        }
+      }
+      if (nCount > 0) {
+        aliX /= nCount; aliY /= nCount;
+        cohX = cohX / nCount - b.x;
+        cohY = cohY / nCount - b.y;
+      }
+
+      let tx, ty;
+      if (shape === 'dot') {
+        const ang = Math.atan2(b.y - targetCenterY, b.x - targetCenterX);
+        const r = 75;
+        tx = targetCenterX + Math.cos(ang) * r;
+        ty = targetCenterY + Math.sin(ang) * r * 0.8;
+      } else if (shape === 'dash') {
+        const ang = Math.atan2(b.y - targetCenterY, b.x - targetCenterX);
+        const rx = 230, ry = 28;
+        tx = targetCenterX + Math.cos(ang) * rx;
+        ty = targetCenterY + Math.sin(ang) * ry;
+      } else {
+        tx = b.x + Math.cos(b.phase + t * 0.001) * 40;
+        ty = targetCenterY + Math.sin(b.phase * 2 + t * 0.0008) * 120;
+      }
+      const toTX = (tx - b.x) * 0.013 * (0.55 + pulseStrength);
+      const toTY = (ty - b.y) * 0.013 * (0.55 + pulseStrength);
+
+      b.vx += sepX * 0.02 + aliX * 0.05 + cohX * 0.001 + toTX;
+      b.vy += sepY * 0.02 + aliY * 0.05 + cohY * 0.001 + toTY;
+
+      for (const p of pulses) {
+        const dx = b.x - p.x;
+        const dy = b.y - p.y;
+        const d = Math.hypot(dx, dy) + 1;
+        const f = Math.max(0, 120 - Math.abs(d - p.t * 4)) / 120;
+        b.vx += (dx / d) * f * 1.1;
+        b.vy += (dy / d) * f * 1.1;
+      }
+
+      const sp = Math.hypot(b.vx, b.vy);
+      const maxSp = 3.8;
+      if (sp > maxSp) { b.vx = b.vx / sp * maxSp; b.vy = b.vy / sp * maxSp; }
+
+      b.x += b.vx;
+      b.y += b.vy;
+
+      if (b.x < 0) b.x += W;
+      if (b.x > W) b.x -= W;
+      if (b.y < 40) { b.y = 40; b.vy *= -0.5; }
+      if (b.y > BASELINE_Y + 90) { b.y = BASELINE_Y + 90; b.vy *= -0.5; }
+
+      const ang = Math.atan2(b.vy, b.vx);
+      const size = 5.4 + pulseStrength * 2.6;
+      const lum = 56 + pulseStrength * 32;
+      const hue = (shape === 'dot') ? 46 : (shape === 'dash') ? 36 : 30;
+      ctx.fillStyle = `hsl(${hue}, 95%, ${lum}%)`;
+      ctx.beginPath();
+      ctx.moveTo(b.x + Math.cos(ang) * size,     b.y + Math.sin(ang) * size);
+      ctx.lineTo(b.x + Math.cos(ang + 2.4) * size * 0.55, b.y + Math.sin(ang + 2.4) * size * 0.55);
+      ctx.lineTo(b.x + Math.cos(ang - 2.4) * size * 0.55, b.y + Math.sin(ang - 2.4) * size * 0.55);
+      ctx.closePath();
+      ctx.fill();
+    }
+
+    // Central pulse glow
+    if (shape === 'dot' || shape === 'dash') {
+      const glowR = (shape === 'dot' ? 140 : 300) * (0.5 + pulseStrength);
+      const rg = ctx.createRadialGradient(targetCenterX, targetCenterY, 0, targetCenterX, targetCenterY, glowR);
+      rg.addColorStop(0, `rgba(255, 220, 130, ${0.45 * pulseStrength})`);
+      rg.addColorStop(1, 'rgba(255, 220, 130, 0)');
+      ctx.fillStyle = rg;
+      ctx.beginPath();
+      ctx.arc(targetCenterX, targetCenterY, glowR, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    // Click pulse rings
+    for (let i = pulses.length - 1; i >= 0; i--) {
+      const p = pulses[i];
+      p.t += 1;
+      ctx.strokeStyle = `rgba(255, 220, 130, ${Math.max(0, 1 - p.t / 80)})`;
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, p.t * 4, 0, Math.PI * 2);
+      ctx.stroke();
+      if (p.t > 80) pulses.splice(i, 1);
+    }
+
+    // Running morse tape
+    ctx.save();
+    ctx.font = 'bold 20px Courier New';
+    ctx.fillStyle = 'rgba(255, 230, 160, 0.85)';
+    ctx.textAlign = 'center';
+    const tape = morseBuffer.slice(-34);
+    ctx.fillText(tape, W / 2, H - 22);
+    ctx.restore();
+
+    // Title
+    ctx.save();
+    ctx.font = 'bold 16px Courier New';
+    ctx.fillStyle = 'rgba(244, 212, 138, 0.85)';
+    ctx.textAlign = 'right';
+    ctx.fillText('TELEGRAPH  MURMURATION', W - 20, 32);
+    ctx.font = '11px Courier New';
+    ctx.fillStyle = 'rgba(244, 212, 138, 0.5)';
+    ctx.fillText('exp-083 / flock as key', W - 20, 52);
+    ctx.restore();
+
+    requestAnimationFrame(frame);
+  }
+
+  ctx.fillStyle = '#0b0614';
+  ctx.fillRect(0, 0, W, H);
+
+  requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>

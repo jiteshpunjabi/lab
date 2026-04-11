@@ -1,0 +1,306 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>exp-055 -- Parliament of Clocks</title>
+<style>
+*{margin:0;padding:0}
+body{overflow:hidden;background:#0a0a14}
+canvas{display:block;width:100vw;height:100vh}
+#info{position:fixed;bottom:10px;left:12px;color:rgba(180,180,220,0.3);font:11px/1.4 monospace;pointer-events:none;z-index:10}
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="info">hover to disrupt consensus</div>
+<script>
+// PARLIAMENT OF CLOCKS
+// Paradoxical Constraint: simultaneously fast and slow
+//
+// 31 delegates in a ring, each operating at wildly different timescales
+// spanning 5 orders of magnitude. Fast delegates orbit frantically with
+// long motion trails; slow ones barely move. Each holds a "hue opinion"
+// and they converge via circular averaging toward a single consensus
+// displayed as a central orb. Mouse hover disrupts nearby delegates.
+
+(() => {
+  const canvas = document.getElementById('c');
+  const ctx = canvas.getContext('2d');
+  const W = 1280, H = 720;
+  canvas.width = W; canvas.height = H;
+
+  const CX = W / 2, CY = H / 2;
+  const NUM_DELEGATES = 31;
+  const RING_RADIUS = 240;
+  const TRAIL_LENGTH = 60;
+
+  let mouseX = -9999, mouseY = -9999;
+  let mouseActive = false;
+
+  canvas.addEventListener('mousemove', e => {
+    const rect = canvas.getBoundingClientRect();
+    mouseX = (e.clientX - rect.left) * (W / rect.width);
+    mouseY = (e.clientY - rect.top) * (H / rect.height);
+    mouseActive = true;
+  });
+  canvas.addEventListener('mouseleave', () => { mouseActive = false; });
+
+  // Timescales span 5 orders of magnitude: 0.0001 to 10.0
+  // Logarithmically distributed
+  function makeDelegate(i) {
+    const t = i / (NUM_DELEGATES - 1);
+    // Logarithmic timescale: 10^(-4) to 10^(1) = 5 orders of magnitude
+    const speed = Math.pow(10, -4 + t * 5);
+    // Starting angle on the ring
+    const baseAngle = (i / NUM_DELEGATES) * Math.PI * 2;
+    // Random hue opinion (0-360)
+    const hue = Math.random() * 360;
+    // Orbital radius varies slightly per delegate
+    const orbitRadius = RING_RADIUS + (Math.random() - 0.5) * 60;
+    // Orbit eccentricity
+    const eccentricity = 0.15 + Math.random() * 0.25;
+    // Size inversely related to speed (slow = larger, contemplative)
+    const size = 3 + (1 - t) * 8;
+
+    return {
+      index: i,
+      speed,
+      baseAngle,
+      phase: Math.random() * Math.PI * 2,
+      hue,
+      targetHue: hue,
+      orbitRadius,
+      eccentricity,
+      size,
+      x: 0, y: 0,
+      trail: [],
+      disrupted: 0
+    };
+  }
+
+  const delegates = [];
+  for (let i = 0; i < NUM_DELEGATES; i++) {
+    delegates.push(makeDelegate(i));
+  }
+
+  // Circular mean of angles (in degrees)
+  function circularMean(angles) {
+    let sinSum = 0, cosSum = 0;
+    for (const a of angles) {
+      const rad = a * Math.PI / 180;
+      sinSum += Math.sin(rad);
+      cosSum += Math.cos(rad);
+    }
+    let mean = Math.atan2(sinSum / angles.length, cosSum / angles.length) * 180 / Math.PI;
+    if (mean < 0) mean += 360;
+    return mean;
+  }
+
+  // Circular distance
+  function hueDist(a, b) {
+    let d = Math.abs(a - b) % 360;
+    return d > 180 ? 360 - d : d;
+  }
+
+  // Lerp on circular hue
+  function hueLerp(a, b, t) {
+    let diff = b - a;
+    if (diff > 180) diff -= 360;
+    if (diff < -180) diff += 360;
+    let result = a + diff * t;
+    if (result < 0) result += 360;
+    if (result >= 360) result -= 360;
+    return result;
+  }
+
+  let consensusHue = circularMean(delegates.map(d => d.hue));
+  let time = 0;
+
+  function update(dt) {
+    time += dt;
+
+    // Update delegate positions and opinions
+    for (const d of delegates) {
+      // Orbital motion - speed determines how fast they orbit
+      const angle = d.baseAngle + time * d.speed * 2;
+      const rx = d.orbitRadius * (1 + d.eccentricity * Math.sin(angle * 1.7));
+      const ry = d.orbitRadius * (1 + d.eccentricity * Math.cos(angle * 2.3));
+      d.x = CX + Math.cos(angle) * rx;
+      d.y = CY + Math.sin(angle) * ry * 0.6; // Slight vertical compression for perspective
+
+      // Mouse disruption
+      if (mouseActive) {
+        const dx = d.x - mouseX;
+        const dy = d.y - mouseY;
+        const dist = Math.sqrt(dx * dx + dy * dy);
+        if (dist < 150) {
+          d.disrupted = Math.min(1, d.disrupted + dt * 3);
+          // Disrupt hue opinion - push away from consensus
+          const push = (1 - dist / 150) * 120;
+          d.hue = (d.hue + push * dt * 2) % 360;
+        } else {
+          d.disrupted = Math.max(0, d.disrupted - dt * 0.5);
+        }
+      } else {
+        d.disrupted = Math.max(0, d.disrupted - dt * 0.5);
+      }
+
+      // Opinion convergence: each delegate averages with neighbors
+      // Convergence rate proportional to speed (fast delegates change opinion faster)
+      const left = delegates[(d.index - 1 + NUM_DELEGATES) % NUM_DELEGATES];
+      const right = delegates[(d.index + 1) % NUM_DELEGATES];
+      const neighborMean = circularMean([left.hue, right.hue, d.hue]);
+      const convergenceRate = Math.min(d.speed * 0.3, 0.5) * (1 - d.disrupted * 0.8);
+      d.hue = hueLerp(d.hue, neighborMean, convergenceRate * dt);
+
+      // Also pull slightly toward global consensus
+      d.hue = hueLerp(d.hue, consensusHue, 0.02 * dt * (1 - d.disrupted));
+
+      // Trail - only store if delegate moves fast enough to see
+      d.trail.push({ x: d.x, y: d.y, hue: d.hue, age: 0 });
+      const maxTrail = Math.min(TRAIL_LENGTH, Math.floor(d.speed * 500) + 3);
+      while (d.trail.length > maxTrail) d.trail.shift();
+      for (const pt of d.trail) pt.age += dt;
+    }
+
+    // Update global consensus
+    consensusHue = circularMean(delegates.map(d => d.hue));
+  }
+
+  function draw() {
+    // Fade background
+    ctx.fillStyle = 'rgba(10, 10, 20, 0.15)';
+    ctx.fillRect(0, 0, W, H);
+
+    // Draw connection web between neighbors (subtle)
+    ctx.lineWidth = 0.5;
+    for (let i = 0; i < NUM_DELEGATES; i++) {
+      const d = delegates[i];
+      const next = delegates[(i + 1) % NUM_DELEGATES];
+      const avgHue = hueLerp(d.hue, next.hue, 0.5);
+      ctx.strokeStyle = `hsla(${avgHue}, 60%, 40%, 0.08)`;
+      ctx.beginPath();
+      ctx.moveTo(d.x, d.y);
+      ctx.lineTo(next.x, next.y);
+      ctx.stroke();
+    }
+
+    // Draw trails
+    for (const d of delegates) {
+      if (d.trail.length < 2) continue;
+      const trailAlphaBase = Math.min(0.6, d.speed * 10);
+      for (let i = 1; i < d.trail.length; i++) {
+        const pt = d.trail[i];
+        const prev = d.trail[i - 1];
+        const frac = i / d.trail.length;
+        const alpha = frac * trailAlphaBase;
+        const width = d.size * frac * 0.7;
+        ctx.strokeStyle = `hsla(${pt.hue}, 85%, 60%, ${alpha})`;
+        ctx.lineWidth = width;
+        ctx.beginPath();
+        ctx.moveTo(prev.x, prev.y);
+        ctx.lineTo(pt.x, pt.y);
+        ctx.stroke();
+      }
+    }
+
+    // Draw delegates
+    for (const d of delegates) {
+      const sat = 80 + d.disrupted * 20;
+      const light = 55 + d.disrupted * 20;
+
+      // Glow
+      const glowSize = d.size * (2.5 + d.disrupted * 2);
+      const grad = ctx.createRadialGradient(d.x, d.y, 0, d.x, d.y, glowSize);
+      grad.addColorStop(0, `hsla(${d.hue}, ${sat}%, ${light}%, 0.6)`);
+      grad.addColorStop(0.5, `hsla(${d.hue}, ${sat}%, ${light}%, 0.15)`);
+      grad.addColorStop(1, `hsla(${d.hue}, ${sat}%, ${light}%, 0)`);
+      ctx.fillStyle = grad;
+      ctx.beginPath();
+      ctx.arc(d.x, d.y, glowSize, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Core
+      ctx.fillStyle = `hsl(${d.hue}, ${sat}%, ${light}%)`;
+      ctx.beginPath();
+      ctx.arc(d.x, d.y, d.size, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Bright center
+      ctx.fillStyle = `hsla(${d.hue}, 40%, 90%, 0.8)`;
+      ctx.beginPath();
+      ctx.arc(d.x, d.y, d.size * 0.35, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    // Draw consensus orb at center
+    const orbPulse = 1 + 0.08 * Math.sin(time * 1.5);
+    const orbRadius = 35 * orbPulse;
+
+    // Outer glow
+    const orbGrad = ctx.createRadialGradient(CX, CY, 0, CX, CY, orbRadius * 3);
+    orbGrad.addColorStop(0, `hsla(${consensusHue}, 90%, 65%, 0.5)`);
+    orbGrad.addColorStop(0.3, `hsla(${consensusHue}, 80%, 50%, 0.2)`);
+    orbGrad.addColorStop(0.7, `hsla(${consensusHue}, 70%, 40%, 0.05)`);
+    orbGrad.addColorStop(1, `hsla(${consensusHue}, 60%, 30%, 0)`);
+    ctx.fillStyle = orbGrad;
+    ctx.beginPath();
+    ctx.arc(CX, CY, orbRadius * 3, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Inner orb
+    const innerGrad = ctx.createRadialGradient(CX - orbRadius * 0.2, CY - orbRadius * 0.2, 0, CX, CY, orbRadius);
+    innerGrad.addColorStop(0, `hsla(${consensusHue}, 50%, 95%, 0.9)`);
+    innerGrad.addColorStop(0.4, `hsla(${consensusHue}, 85%, 65%, 0.8)`);
+    innerGrad.addColorStop(1, `hsla(${consensusHue}, 90%, 40%, 0.6)`);
+    ctx.fillStyle = innerGrad;
+    ctx.beginPath();
+    ctx.arc(CX, CY, orbRadius, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Consensus label
+    ctx.fillStyle = `hsla(${consensusHue}, 50%, 85%, 0.4)`;
+    ctx.font = '10px monospace';
+    ctx.textAlign = 'center';
+    ctx.fillText(`consensus: ${Math.round(consensusHue)}°`, CX, CY + orbRadius + 18);
+
+    // Draw timescale indicators on edges
+    ctx.fillStyle = 'rgba(180,180,220,0.15)';
+    ctx.font = '9px monospace';
+    ctx.textAlign = 'left';
+    ctx.fillText('fast (10 Hz)', 12, 18);
+    ctx.textAlign = 'right';
+    ctx.fillText('slow (0.0001 Hz)', W - 12, 18);
+
+    // Agreement meter
+    const hues = delegates.map(d => d.hue);
+    let totalDist = 0;
+    for (const h of hues) totalDist += hueDist(h, consensusHue);
+    const avgDist = totalDist / hues.length;
+    const agreement = Math.max(0, 1 - avgDist / 180);
+
+    ctx.fillStyle = `hsla(${consensusHue}, 60%, 70%, 0.3)`;
+    ctx.textAlign = 'center';
+    ctx.font = '10px monospace';
+    ctx.fillText(`agreement: ${(agreement * 100).toFixed(1)}%`, CX, H - 14);
+  }
+
+  let lastTime = performance.now();
+  function loop(now) {
+    const dt = Math.min((now - lastTime) / 1000, 0.05);
+    lastTime = now;
+    update(dt);
+    draw();
+    requestAnimationFrame(loop);
+  }
+
+  // Initial full draw to clear
+  ctx.fillStyle = '#0a0a14';
+  ctx.fillRect(0, 0, W, H);
+
+  requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

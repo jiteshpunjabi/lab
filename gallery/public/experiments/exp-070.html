@@ -1,0 +1,401 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=1280,height=720">
+<title>The Unsent Letter</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    width: 1280px; height: 720px; overflow: hidden;
+    background: #1a1410;
+    display: flex; justify-content: center; align-items: center;
+    font-family: Georgia, 'Times New Roman', serif;
+  }
+  .desk {
+    width: 1280px; height: 720px;
+    position: relative;
+    background: radial-gradient(ellipse at 60% 45%, #2e2218 0%, #1a1410 60%, #110e09 100%);
+  }
+  .paper {
+    position: absolute;
+    top: 48%; left: 48%;
+    transform: translate(-50%, -50%) rotate(-1.2deg);
+    width: 600px; height: 540px;
+    background: linear-gradient(175deg, #f5f0e6 0%, #ede6d6 40%, #e8dfc8 100%);
+    border-radius: 2px;
+    box-shadow:
+      0 2px 20px rgba(0,0,0,0.4),
+      0 0 60px rgba(0,0,0,0.2),
+      inset 0 0 40px rgba(160,140,110,0.15);
+    padding: 40px 50px;
+  }
+  .paper::before {
+    content: '';
+    position: absolute;
+    top: 0; left: 0; right: 0; bottom: 0;
+    background: repeating-linear-gradient(
+      transparent 0px, transparent 28px,
+      rgba(120,140,180,0.1) 28px, rgba(120,140,180,0.1) 29px
+    );
+    pointer-events: none;
+    border-radius: 2px;
+  }
+  .letter-text {
+    position: relative;
+    width: 100%;
+    height: 100%;
+    z-index: 2;
+  }
+  .letter-line {
+    font-size: 15.5px;
+    line-height: 29px;
+    color: rgba(26, 42, 68, var(--ink-opacity, 0));
+    font-family: Georgia, 'Times New Roman', serif;
+    white-space: pre;
+    transition: color 2s ease;
+    letter-spacing: 0.3px;
+  }
+  .letter-line.empty {
+    height: 29px;
+  }
+  .candle-area {
+    position: absolute;
+    bottom: 50px; right: 100px;
+  }
+  .candle-svg { width: 40px; height: 110px; }
+  .flame-glow {
+    position: absolute;
+    right: 70px; bottom: 130px;
+    width: 200px; height: 200px;
+    background: radial-gradient(circle, rgba(255,180,60,0.12) 0%, rgba(255,140,40,0.05) 40%, transparent 70%);
+    border-radius: 50%;
+    animation: flicker 3s ease-in-out infinite alternate;
+    pointer-events: none;
+  }
+  .flame-glow-2 {
+    position: absolute;
+    right: 30px; bottom: 90px;
+    width: 300px; height: 300px;
+    background: radial-gradient(circle, rgba(255,160,50,0.04) 0%, transparent 60%);
+    border-radius: 50%;
+    animation: flicker 4s ease-in-out infinite alternate-reverse;
+    pointer-events: none;
+  }
+  @keyframes flicker {
+    0% { opacity: 0.7; transform: scale(1); }
+    25% { opacity: 0.9; transform: scale(1.05); }
+    50% { opacity: 0.6; transform: scale(0.95); }
+    75% { opacity: 0.85; transform: scale(1.02); }
+    100% { opacity: 0.75; transform: scale(0.98); }
+  }
+  .status-line {
+    position: absolute;
+    bottom: 16px; left: 50%;
+    transform: translateX(-50%);
+    color: rgba(180,160,130,0.45);
+    font-size: 12px;
+    font-style: italic;
+    letter-spacing: 0.5px;
+  }
+  .time-away {
+    position: absolute;
+    top: 16px; right: 24px;
+    color: rgba(180,160,130,0.4);
+    font-size: 11px;
+    font-style: italic;
+  }
+  .tear-stain {
+    position: absolute;
+    border-radius: 50%;
+    background: radial-gradient(circle, rgba(170,155,130,0.18) 0%, rgba(170,155,130,0.06) 50%, transparent 100%);
+    pointer-events: none;
+    z-index: 1;
+    opacity: 0;
+    transition: opacity 4s ease;
+  }
+  .tear-stain.show { opacity: 1; }
+  .pen {
+    position: absolute;
+    bottom: 185px; right: 180px;
+    width: 130px; height: 8px;
+    transform: rotate(-28deg);
+    transform-origin: right center;
+  }
+  .pen-body {
+    width: 100%; height: 100%;
+    background: linear-gradient(to right, #2a1a10 0%, #3a2818 40%, #1a1008 100%);
+    border-radius: 2px 0 0 2px;
+    position: relative;
+  }
+  .pen-nib {
+    position: absolute;
+    right: -14px; top: 0px;
+    width: 14px; height: 8px;
+    background: linear-gradient(to right, #7a6a40, #b8a870);
+    clip-path: polygon(0 0, 100% 35%, 100% 65%, 0 100%);
+  }
+  .wood-grain {
+    position: absolute;
+    top: 0; left: 0; right: 0; bottom: 0;
+    background:
+      linear-gradient(90deg,
+        transparent 0%, rgba(60,40,20,0.12) 20%,
+        transparent 40%, rgba(60,40,20,0.08) 60%,
+        transparent 80%
+      );
+    pointer-events: none;
+  }
+  .ink-well {
+    position: absolute;
+    bottom: 80px; right: 240px;
+  }
+</style>
+</head>
+<body>
+<div class="desk">
+  <div class="wood-grain"></div>
+  <div class="flame-glow-2"></div>
+  <div class="flame-glow"></div>
+  <div class="paper" id="paper">
+    <div class="letter-text" id="letterText"></div>
+  </div>
+  <div class="candle-area">
+    <svg class="candle-svg" viewBox="0 0 40 110">
+      <rect x="12" y="35" width="16" height="72" rx="2" fill="url(#candleBody)"/>
+      <rect x="10" y="32" width="20" height="6" rx="2" fill="#d4c8a8"/>
+      <line x1="20" y1="32" x2="20" y2="22" stroke="#444" stroke-width="1.2"/>
+      <ellipse cx="20" cy="16" rx="5" ry="9" fill="url(#flameGrad)">
+        <animate attributeName="ry" values="9;10;7.5;9.5;9" dur="2s" repeatCount="indefinite"/>
+        <animate attributeName="rx" values="5;4.5;5.5;4.8;5" dur="1.7s" repeatCount="indefinite"/>
+      </ellipse>
+      <ellipse cx="20" cy="18" rx="2.5" ry="4" fill="url(#flameInner)">
+        <animate attributeName="ry" values="4;4.5;3.5;4.2;4" dur="1.5s" repeatCount="indefinite"/>
+      </ellipse>
+      <defs>
+        <radialGradient id="flameGrad" cx="50%" cy="65%">
+          <stop offset="0%" stop-color="#fff8e0"/>
+          <stop offset="25%" stop-color="#ffcc44"/>
+          <stop offset="60%" stop-color="#ff8800"/>
+          <stop offset="100%" stop-color="#cc440044"/>
+        </radialGradient>
+        <radialGradient id="flameInner" cx="50%" cy="60%">
+          <stop offset="0%" stop-color="#ffffffdd"/>
+          <stop offset="60%" stop-color="#ffee88aa"/>
+          <stop offset="100%" stop-color="#ffcc4400"/>
+        </radialGradient>
+        <linearGradient id="candleBody" x1="0" y1="0" x2="1" y2="0">
+          <stop offset="0%" stop-color="#e8dcc0"/>
+          <stop offset="50%" stop-color="#f0e8d4"/>
+          <stop offset="100%" stop-color="#ddd0b0"/>
+        </linearGradient>
+      </defs>
+    </svg>
+  </div>
+  <div class="ink-well">
+    <svg width="35" height="40" viewBox="0 0 35 40">
+      <ellipse cx="17.5" cy="30" rx="14" ry="8" fill="#1a1410"/>
+      <ellipse cx="17.5" cy="12" rx="12" ry="7" fill="#222"/>
+      <rect x="5.5" y="12" width="24" height="18" fill="#1a1a1a"/>
+      <ellipse cx="17.5" cy="12" rx="9" ry="4.5" fill="#0a0a1a"/>
+      <ellipse cx="16" cy="11" rx="3" ry="1.5" fill="rgba(40,60,100,0.3)"/>
+    </svg>
+  </div>
+  <div class="pen">
+    <div class="pen-body"><div class="pen-nib"></div></div>
+  </div>
+  <div class="status-line" id="status">the pen hesitates...</div>
+  <div class="time-away" id="timeAway"></div>
+</div>
+
+<script>
+var STORAGE_KEY = 'unsent-letter-070';
+var lines = [
+  "I keep starting this letter",
+  "and stopping. The words",
+  "rearrange themselves when",
+  "I look away, as if they know",
+  "what I actually mean to say",
+  "and refuse to cooperate.",
+  "",
+  "You left in October. The light",
+  "changed the next morning",
+  "like it had been waiting for",
+  "permission. I still set two",
+  "mugs on the counter sometimes.",
+  "The second one gets cold.",
+  "",
+  "There is a particular silence",
+  "that lives in the hallway now.",
+  "It has weight. It has opinions.",
+  "It settles on the bookshelves",
+  "like dust with ambitions.",
+  "",
+  "I almost called last Tuesday.",
+  "My thumb hovered so long the",
+  "screen went dark. Even the",
+  "phone knew better.",
+  "",
+  "What I wanted to tell you:",
+  "the garden came back. Those",
+  "roses you said would never",
+  "take root\u2014they bloomed",
+  "the color of old arguments,",
+  "beautiful and full of thorns.",
+  "",
+  "I will not send this."
+];
+
+var statusEl = document.getElementById('status');
+var timeAwayEl = document.getElementById('timeAway');
+var letterText = document.getElementById('letterText');
+
+var lineEls = [];
+lines.forEach(function(line) {
+  var div = document.createElement('div');
+  div.className = 'letter-line' + (line === '' ? ' empty' : '');
+  if (line !== '') div.textContent = line;
+  letterText.appendChild(div);
+  lineEls.push(div);
+});
+
+function loadState() {
+  try { var s = localStorage.getItem(STORAGE_KEY); return s ? JSON.parse(s) : {}; }
+  catch(e) { return {}; }
+}
+
+var state = loadState();
+var revealedLines = state.revealedLines || 0;
+var inkOpacity = state.inkOpacity !== undefined ? state.inkOpacity : 1.0;
+var lastVisit = state.lastVisit || Date.now();
+var totalTime = state.totalTime || 0;
+var sessionStart = Date.now();
+var tearStainData = state.tearStains || [];
+
+function saveState() {
+  localStorage.setItem(STORAGE_KEY, JSON.stringify({
+    revealedLines: revealedLines,
+    inkOpacity: inkOpacity,
+    lastVisit: Date.now(),
+    totalTime: totalTime + (Date.now() - sessionStart),
+    tearStains: tearStainData
+  }));
+}
+
+// Fade from absence
+var timeSince = Date.now() - lastVisit;
+if (timeSince > 10000 && state.lastVisit) {
+  var hoursAway = timeSince / (1000 * 60 * 60);
+  var fadeFactor = Math.max(0.08, 1 - hoursAway * 0.05);
+  inkOpacity = Math.max(0.08, inkOpacity * fadeFactor);
+  var mins = Math.floor(hoursAway * 60);
+  var hrs = Math.floor(hoursAway);
+  var days = Math.floor(hoursAway / 24);
+  var timeStr = '';
+  if (days > 0) timeStr = days + ' day' + (days>1?'s':'') + ' away';
+  else if (hrs > 0) timeStr = hrs + ' hour' + (hrs>1?'s':'') + ' away';
+  else if (mins > 0) timeStr = mins + ' minute' + (mins>1?'s':'') + ' away';
+  else timeStr = 'moments away';
+  timeAwayEl.textContent = 'you were gone ' + timeStr + '. the ink faded.';
+  setTimeout(function() {
+    timeAwayEl.style.transition = 'opacity 8s';
+    timeAwayEl.style.opacity = '0';
+  }, 5000);
+}
+
+// Show already-revealed lines instantly
+for (var i = 0; i < revealedLines && i < lineEls.length; i++) {
+  lineEls[i].style.transition = 'none';
+  lineEls[i].style.color = 'rgba(26, 42, 68, ' + inkOpacity + ')';
+}
+
+// Restore tear stains
+function addTearStain(x, y, r) {
+  var div = document.createElement('div');
+  div.className = 'tear-stain';
+  div.style.left = x + 'px';
+  div.style.top = y + 'px';
+  div.style.width = r * 2 + 'px';
+  div.style.height = r * 2 + 'px';
+  document.getElementById('paper').appendChild(div);
+  setTimeout(function() { div.classList.add('show'); }, 100);
+  return div;
+}
+tearStainData.forEach(function(ts) {
+  var d = addTearStain(ts.x, ts.y, ts.r);
+  d.classList.add('show');
+});
+
+// Animation
+var BASE_INTERVAL = 3200;
+var lastRevealTime = performance.now() - (revealedLines > 0 ? 0 : 800);
+var emotionalLines = [5, 12, 18, 23, 30, 32];
+
+function getInterval(lineIdx) {
+  if (lines[lineIdx] === '') return 400;
+  if (lineIdx < 7) return 700;  // First stanza reveals faster
+  if (emotionalLines.indexOf(lineIdx) !== -1) return 4500; // Pause on emotional lines
+  return BASE_INTERVAL;
+}
+
+function update(now) {
+  // Reveal next line
+  if (revealedLines < lines.length) {
+    var interval = getInterval(revealedLines);
+    if (now - lastRevealTime > interval) {
+      lineEls[revealedLines].style.transition = 'color 2s ease';
+      lineEls[revealedLines].style.color = 'rgba(26, 42, 68, ' + inkOpacity + ')';
+      lastRevealTime = now;
+      revealedLines++;
+    }
+  }
+
+  // Restore opacity slowly while present
+  if (inkOpacity < 1) {
+    inkOpacity = Math.min(1, inkOpacity + 0.000006);
+    if (Math.floor(now / 4000) !== Math.floor((now - 16) / 4000)) {
+      for (var j = 0; j < revealedLines && j < lineEls.length; j++) {
+        lineEls[j].style.color = 'rgba(26, 42, 68, ' + inkOpacity + ')';
+      }
+    }
+  }
+
+  // Occasional tear stains near emotional lines
+  if (revealedLines > 3 && tearStainData.length < 6) {
+    var isEmotional = emotionalLines.indexOf(revealedLines - 1) !== -1;
+    if (isEmotional && Math.random() < 0.003) {
+      var lineP = (revealedLines - 1) / lines.length;
+      var tx = 55 + Math.random() * 430;
+      var ty = 40 + lineP * 420;
+      var tr = 14 + Math.random() * 22;
+      addTearStain(tx, ty, tr);
+      tearStainData.push({x: tx, y: ty, r: tr});
+    }
+  }
+
+  // Status text
+  var progress = revealedLines / lines.length;
+  if (progress === 0) statusEl.textContent = 'the pen hesitates...';
+  else if (progress < 0.22) statusEl.textContent = 'the words are finding their way';
+  else if (progress < 0.5) statusEl.textContent = 'stay. there is more to say.';
+  else if (progress < 0.78) statusEl.textContent = 'almost everything now...';
+  else if (progress < 1) statusEl.textContent = 'the letter is nearly finished';
+  else statusEl.textContent = 'this letter will never be sent.';
+
+  if (Math.floor(now / 5000) !== Math.floor((now - 16) / 5000)) saveState();
+  requestAnimationFrame(update);
+}
+
+requestAnimationFrame(update);
+window.addEventListener('beforeunload', saveState);
+document.addEventListener('visibilitychange', function() { if (document.hidden) saveState(); });
+
+document.addEventListener('mousemove', function(e) {
+  var glow = document.querySelector('.flame-glow');
+  var dx = (e.clientX - 1100) * 0.015;
+  var dy = (e.clientY - 500) * 0.015;
+  glow.style.transform = 'translate(' + dx + 'px, ' + dy + 'px)';
+});
+</script>
+</body>
+</html>

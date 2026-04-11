@@ -1,0 +1,493 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=1280,height=720">
+<title>Immune Parliament</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { width: 1280px; height: 720px; overflow: hidden; background: #0a0a1a; font-family: 'Courier New', monospace; }
+canvas { display: block; }
+#overlay {
+  position: absolute; top: 10px; left: 10px; color: #aac; font-size: 11px;
+  pointer-events: none; text-shadow: 0 0 4px rgba(100,100,200,0.5);
+}
+#title {
+  position: absolute; top: 10px; right: 20px; color: #8899cc; font-size: 14px;
+  font-weight: bold; letter-spacing: 2px; text-shadow: 0 0 8px rgba(100,150,255,0.4);
+  pointer-events: none;
+}
+#verdict {
+  position: absolute; bottom: 20px; left: 50%; transform: translateX(-50%);
+  font-size: 18px; font-weight: bold; letter-spacing: 3px;
+  pointer-events: none; text-shadow: 0 0 12px currentColor;
+  transition: opacity 0.5s; opacity: 0;
+}
+</style>
+</head>
+<body>
+<canvas id="c" width="1280" height="720"></canvas>
+<div id="overlay"></div>
+<div id="title">IMMUNE PARLIAMENT</div>
+<div id="verdict"></div>
+<script>
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d');
+const W = 1280, H = 720;
+
+const FACTIONS = {
+  tcell:      { name: 'T-Cell Caucus',      color: '#ff4466', glow: '#ff224488', role: 'prosecutor', shape: 'triangle' },
+  bcell:      { name: 'B-Cell Assembly',     color: '#44aaff', glow: '#2288ff88', role: 'arms-maker', shape: 'diamond' },
+  macrophage: { name: 'Macrophage Order',    color: '#44ff88', glow: '#22ff6688', role: 'enforcer', shape: 'circle' },
+  dendritic:  { name: 'Dendritic Council',   color: '#ffaa22', glow: '#ff882288', role: 'intelligence', shape: 'star' },
+  regulatory: { name: 'Regulatory Senate',   color: '#aa66ff', glow: '#8844ff88', role: 'peacekeeper', shape: 'hexagon' },
+};
+
+const FACTION_KEYS = Object.keys(FACTIONS);
+
+const CHAMBER_CX = W / 2;
+const CHAMBER_CY = H / 2 + 60;
+const CHAMBER_RX = 420;
+const CHAMBER_RY = 260;
+
+class Antigen {
+  constructor() {
+    this.x = W / 2 + (Math.random() - 0.5) * 120;
+    this.y = H / 2 - 80 + (Math.random() - 0.5) * 40;
+    this.size = 12 + Math.random() * 8;
+    this.danger = Math.random();
+    this.spikes = 5 + Math.floor(Math.random() * 6);
+    this.rotation = Math.random() * Math.PI * 2;
+    this.rotSpeed = (Math.random() - 0.5) * 0.02;
+    this.color = this.danger > 0.5 ? 'hsl(' + (350 + Math.random()*20) + ', 80%, 60%)' : 'hsl(' + (40 + Math.random()*40) + ', 70%, 55%)';
+    this.opacity = 0;
+    this.born = Date.now();
+    this.debateTime = 4000 + Math.random() * 6000;
+    this.votes = {};
+    this.resolved = false;
+    this.verdict = null;
+    this.verdictTime = 0;
+  }
+}
+
+class Delegate {
+  constructor(faction, seatAngle, seatRow) {
+    this.faction = faction;
+    this.info = FACTIONS[faction];
+    this.seatAngle = seatAngle;
+    this.seatRow = seatRow;
+    var r = 0.6 + seatRow * 0.2;
+    this.homeX = CHAMBER_CX + Math.cos(seatAngle) * CHAMBER_RX * r;
+    this.homeY = CHAMBER_CY + Math.sin(seatAngle) * CHAMBER_RY * r;
+    this.x = this.homeX;
+    this.y = this.homeY;
+    this.vx = 0;
+    this.vy = 0;
+    this.size = 8 + Math.random() * 4;
+    this.vote = null;
+    this.excitement = 0;
+    this.pulsePhase = Math.random() * Math.PI * 2;
+    this.bias = this.computeBias();
+  }
+
+  computeBias() {
+    switch (this.faction) {
+      case 'tcell': return 0.7;
+      case 'bcell': return 0.55;
+      case 'macrophage': return 0.6;
+      case 'dendritic': return 0.5;
+      case 'regulatory': return 0.25;
+    }
+  }
+
+  deliberate(antigen) {
+    var signal = antigen.danger * 0.5 + this.bias * 0.3 + (Math.random() - 0.5) * 0.4;
+    this.vote = signal > 0.5 ? 'threat' : 'benign';
+    this.excitement = Math.abs(signal - 0.5) * 2;
+  }
+}
+
+class Speech {
+  constructor(x, y, text, color) {
+    this.x = x; this.y = y;
+    this.text = text; this.color = color;
+    this.opacity = 1;
+    this.born = Date.now();
+    this.life = 1500 + Math.random() * 1000;
+    this.vy = -0.3 - Math.random() * 0.3;
+  }
+}
+
+var THREAT_WORDS = ['ATTACK!', 'DANGER!', 'INVADER!', 'DESTROY!', 'ALERT!', 'HOSTILE!', 'MOBILIZE!', 'PATHOGEN!', 'ENGAGE!'];
+var BENIGN_WORDS = ['HARMLESS', 'PEACE', 'TOLERATE', 'IGNORE', 'SELF', 'ALLY', 'STAND DOWN', 'NO THREAT', 'PASS'];
+var DEBATE_WORDS = ['CONSIDER...', 'BUT WHAT IF...', 'EVIDENCE:', 'I OBJECT!', 'SECONDED!', 'HEAR ME!', 'ORDER!'];
+
+var delegates = [];
+var antigens = [];
+var speeches = [];
+var particles = [];
+var totalThreats = 0;
+var totalBenign = 0;
+var autoimmune = 0;
+var correctCalls = 0;
+var sessionTime = 0;
+
+function initDelegates() {
+  delegates = [];
+  var perFaction = 8;
+  FACTION_KEYS.forEach(function(fk, fi) {
+    for (var i = 0; i < perFaction; i++) {
+      var baseAngle = Math.PI + (fi / FACTION_KEYS.length) * Math.PI;
+      var angle = baseAngle + (i / perFaction - 0.5) * (Math.PI / FACTION_KEYS.length) * 0.8;
+      var row = i % 3;
+      delegates.push(new Delegate(fk, angle, row));
+    }
+  });
+}
+
+function spawnAntigen() {
+  if (antigens.filter(function(a) { return !a.resolved; }).length < 3) {
+    antigens.push(new Antigen());
+  }
+}
+
+function drawShape(ctx, x, y, size, shape, rotation) {
+  ctx.save();
+  ctx.translate(x, y);
+  ctx.rotate(rotation || 0);
+  ctx.beginPath();
+  var i, a, r2;
+  switch (shape) {
+    case 'triangle':
+      for (i = 0; i < 3; i++) {
+        a = (i / 3) * Math.PI * 2 - Math.PI / 2;
+        i === 0 ? ctx.moveTo(Math.cos(a) * size, Math.sin(a) * size) : ctx.lineTo(Math.cos(a) * size, Math.sin(a) * size);
+      }
+      ctx.closePath(); break;
+    case 'diamond':
+      ctx.moveTo(0, -size); ctx.lineTo(size * 0.7, 0); ctx.lineTo(0, size); ctx.lineTo(-size * 0.7, 0);
+      ctx.closePath(); break;
+    case 'circle':
+      ctx.arc(0, 0, size, 0, Math.PI * 2); break;
+    case 'star':
+      for (i = 0; i < 10; i++) {
+        a = (i / 10) * Math.PI * 2 - Math.PI / 2;
+        r2 = i % 2 === 0 ? size : size * 0.4;
+        i === 0 ? ctx.moveTo(Math.cos(a) * r2, Math.sin(a) * r2) : ctx.lineTo(Math.cos(a) * r2, Math.sin(a) * r2);
+      }
+      ctx.closePath(); break;
+    case 'hexagon':
+      for (i = 0; i < 6; i++) {
+        a = (i / 6) * Math.PI * 2;
+        i === 0 ? ctx.moveTo(Math.cos(a) * size, Math.sin(a) * size) : ctx.lineTo(Math.cos(a) * size, Math.sin(a) * size);
+      }
+      ctx.closePath(); break;
+  }
+  ctx.restore();
+}
+
+function drawAntigen(ag) {
+  ctx.save();
+  ctx.translate(ag.x, ag.y);
+  ctx.rotate(ag.rotation);
+  ctx.globalAlpha = ag.opacity;
+
+  var grad = ctx.createRadialGradient(0, 0, 0, 0, 0, ag.size * 2.5);
+  grad.addColorStop(0, ag.color.replace(')', ', 0.3)').replace('hsl', 'hsla'));
+  grad.addColorStop(1, 'transparent');
+  ctx.fillStyle = grad;
+  ctx.fillRect(-ag.size * 3, -ag.size * 3, ag.size * 6, ag.size * 6);
+
+  ctx.beginPath();
+  for (var i = 0; i < ag.spikes * 2; i++) {
+    var a = (i / (ag.spikes * 2)) * Math.PI * 2;
+    var r = i % 2 === 0 ? ag.size : ag.size * 0.5;
+    i === 0 ? ctx.moveTo(Math.cos(a) * r, Math.sin(a) * r) : ctx.lineTo(Math.cos(a) * r, Math.sin(a) * r);
+  }
+  ctx.closePath();
+  ctx.fillStyle = ag.color;
+  ctx.fill();
+  ctx.strokeStyle = 'rgba(255,255,255,0.25)';
+  ctx.lineWidth = 1;
+  ctx.stroke();
+
+  // Danger indicator ring
+  if (!ag.resolved) {
+    ctx.beginPath();
+    ctx.arc(0, 0, ag.size + 6, 0, Math.PI * 2);
+    ctx.strokeStyle = 'rgba(255,255,255,0.15)';
+    ctx.setLineDash([2, 4]);
+    ctx.stroke();
+    ctx.setLineDash([]);
+  }
+
+  ctx.restore();
+}
+
+function drawChamber() {
+  ctx.save();
+
+  // Outer arc
+  ctx.strokeStyle = '#223355';
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.ellipse(CHAMBER_CX, CHAMBER_CY, CHAMBER_RX + 40, CHAMBER_RY + 30, 0, Math.PI, Math.PI * 2);
+  ctx.stroke();
+
+  // Tier arcs
+  for (var r = 0; r < 3; r++) {
+    var rx = CHAMBER_RX * (0.6 + r * 0.2);
+    var ry = CHAMBER_RY * (0.6 + r * 0.2);
+    ctx.strokeStyle = 'rgba(40,60,100,' + (0.15 + r * 0.05) + ')';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.ellipse(CHAMBER_CX, CHAMBER_CY, rx, ry, 0, Math.PI, Math.PI * 2);
+    ctx.stroke();
+  }
+
+  // Podium area
+  ctx.strokeStyle = '#334466';
+  ctx.lineWidth = 1.5;
+  ctx.beginPath();
+  ctx.ellipse(CHAMBER_CX, CHAMBER_CY - 80, 80, 40, 0, 0, Math.PI * 2);
+  ctx.stroke();
+
+  // Faction labels
+  ctx.font = '9px Courier New';
+  ctx.textAlign = 'center';
+  FACTION_KEYS.forEach(function(fk, fi) {
+    var baseAngle = Math.PI + (fi / FACTION_KEYS.length) * Math.PI;
+    var lx = CHAMBER_CX + Math.cos(baseAngle) * (CHAMBER_RX + 25);
+    var ly = CHAMBER_CY + Math.sin(baseAngle) * (CHAMBER_RY + 20);
+    ctx.fillStyle = FACTIONS[fk].color + '88';
+    ctx.fillText(FACTIONS[fk].name.toUpperCase(), lx, ly);
+  });
+
+  ctx.restore();
+}
+
+function drawDelegate(d, t) {
+  var pulse = Math.sin(t * 0.003 + d.pulsePhase) * 0.3 + 0.7;
+  var s = d.size * (1 + d.excitement * 0.3 * pulse);
+
+  // Connection lines when voting
+  if (d.vote && d.excitement > 0.3) {
+    ctx.strokeStyle = d.vote === 'threat' ? 'rgba(255,68,102,0.13)' : 'rgba(68,255,136,0.13)';
+    ctx.lineWidth = 0.5;
+    ctx.beginPath();
+    ctx.moveTo(d.x, d.y);
+    ctx.lineTo(CHAMBER_CX, CHAMBER_CY - 80);
+    ctx.stroke();
+  }
+
+  // Glow
+  if (d.excitement > 0.2) {
+    var grad = ctx.createRadialGradient(d.x, d.y, 0, d.x, d.y, s * 3);
+    grad.addColorStop(0, d.info.glow);
+    grad.addColorStop(1, 'transparent');
+    ctx.fillStyle = grad;
+    ctx.beginPath();
+    ctx.arc(d.x, d.y, s * 3, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  // Shape
+  drawShape(ctx, d.x, d.y, s, d.info.shape, t * 0.001);
+  ctx.fillStyle = d.info.color;
+  ctx.globalAlpha = 0.7 + d.excitement * 0.3;
+  ctx.fill();
+  ctx.globalAlpha = 1;
+
+  // Vote indicator
+  if (d.vote) {
+    ctx.font = 'bold 7px Courier New';
+    ctx.textAlign = 'center';
+    ctx.fillStyle = d.vote === 'threat' ? '#ff4466' : '#44ff88';
+    ctx.fillText(d.vote === 'threat' ? '!' : '~', d.x, d.y - s - 4);
+  }
+}
+
+function update(t, dt) {
+  sessionTime += dt;
+
+  if (Math.random() < 0.005) spawnAntigen();
+
+  antigens.forEach(function(ag) {
+    ag.rotation += ag.rotSpeed;
+    ag.opacity = Math.min(1, ag.opacity + 0.02);
+
+    var age = Date.now() - ag.born;
+
+    if (!ag.resolved && age > 800) {
+      var debateProgress = Math.min(1, (age - 800) / ag.debateTime);
+
+      delegates.forEach(function(d, di) {
+        if (!ag.votes[di] && Math.random() < debateProgress * 0.05) {
+          d.deliberate(ag);
+          ag.votes[di] = d.vote;
+
+          if (Math.random() < 0.4) {
+            var words;
+            if (Math.random() < 0.2) {
+              speeches.push(new Speech(d.x, d.y - 15, DEBATE_WORDS[Math.floor(Math.random() * DEBATE_WORDS.length)], '#8899bb'));
+            } else {
+              words = d.vote === 'threat' ? THREAT_WORDS : BENIGN_WORDS;
+              speeches.push(new Speech(d.x, d.y - 15, words[Math.floor(Math.random() * words.length)], d.info.color));
+            }
+          }
+
+          d.excitement = 0.5 + Math.random() * 0.5;
+          d.vx += (CHAMBER_CX - d.x) * 0.003;
+          d.vy += (CHAMBER_CY - 80 - d.y) * 0.003;
+        }
+      });
+
+      var voteKeys = Object.values(ag.votes);
+      if (voteKeys.length >= delegates.length * 0.6 || debateProgress >= 1) {
+        var threatVotes = voteKeys.filter(function(v) { return v === 'threat'; }).length;
+        var benignVotes = voteKeys.filter(function(v) { return v === 'benign'; }).length;
+        ag.resolved = true;
+        ag.verdict = threatVotes > benignVotes ? 'THREAT' : 'BENIGN';
+        ag.verdictTime = Date.now();
+
+        if (ag.verdict === 'THREAT') totalThreats++;
+        else totalBenign++;
+
+        if ((ag.verdict === 'THREAT' && ag.danger > 0.5) || (ag.verdict === 'BENIGN' && ag.danger <= 0.5)) {
+          correctCalls++;
+        } else if (ag.verdict === 'THREAT' && ag.danger <= 0.5) {
+          autoimmune++;
+        }
+
+        for (var i = 0; i < 20; i++) {
+          particles.push({
+            x: ag.x, y: ag.y,
+            vx: (Math.random() - 0.5) * 4,
+            vy: (Math.random() - 0.5) * 4,
+            color: ag.verdict === 'THREAT' ? '#ff4466' : '#44ff88',
+            life: 1,
+            size: 2 + Math.random() * 3,
+          });
+        }
+
+        var vEl = document.getElementById('verdict');
+        vEl.textContent = 'VERDICT: ' + ag.verdict + ' (' + threatVotes + '-' + benignVotes + ')';
+        vEl.style.color = ag.verdict === 'THREAT' ? '#ff4466' : '#44ff88';
+        vEl.style.opacity = 1;
+        setTimeout(function() { vEl.style.opacity = 0; }, 2000);
+      }
+    }
+  });
+
+  antigens = antigens.filter(function(ag) {
+    if (ag.resolved && Date.now() - ag.verdictTime > 3000) {
+      delegates.forEach(function(d) { d.vote = null; d.excitement *= 0.5; });
+      return false;
+    }
+    return true;
+  });
+
+  delegates.forEach(function(d) {
+    d.vx += (d.homeX - d.x) * 0.02;
+    d.vy += (d.homeY - d.y) * 0.02;
+    d.vx *= 0.92;
+    d.vy *= 0.92;
+    d.x += d.vx;
+    d.y += d.vy;
+    d.excitement *= 0.997;
+  });
+
+  speeches = speeches.filter(function(s) {
+    var age = Date.now() - s.born;
+    s.opacity = 1 - age / s.life;
+    s.y += s.vy;
+    return age < s.life;
+  });
+
+  particles = particles.filter(function(p) {
+    p.x += p.vx;
+    p.y += p.vy;
+    p.vx *= 0.98;
+    p.vy *= 0.98;
+    p.life -= 0.015;
+    return p.life > 0;
+  });
+}
+
+function draw(t) {
+  ctx.fillStyle = '#0a0a1a';
+  ctx.fillRect(0, 0, W, H);
+
+  var vignette = ctx.createRadialGradient(W/2, H/2, 200, W/2, H/2, 700);
+  vignette.addColorStop(0, 'transparent');
+  vignette.addColorStop(1, 'rgba(0,0,0,0.5)');
+  ctx.fillStyle = vignette;
+  ctx.fillRect(0, 0, W, H);
+
+  drawChamber();
+
+  // Faction alliances
+  delegates.forEach(function(d, i) {
+    delegates.forEach(function(d2, j) {
+      if (j <= i) return;
+      if (d.faction !== d2.faction) return;
+      if (d.vote && d2.vote && d.vote === d2.vote) {
+        ctx.strokeStyle = d.info.color.slice(0, 7) + '15';
+        ctx.lineWidth = 0.5;
+        ctx.beginPath();
+        ctx.moveTo(d.x, d.y);
+        ctx.lineTo(d2.x, d2.y);
+        ctx.stroke();
+      }
+    });
+  });
+
+  delegates.forEach(function(d) { drawDelegate(d, t); });
+  antigens.forEach(function(ag) { drawAntigen(ag); });
+
+  speeches.forEach(function(s) {
+    ctx.font = 'bold 8px Courier New';
+    ctx.textAlign = 'center';
+    ctx.fillStyle = s.color;
+    ctx.globalAlpha = Math.max(0, s.opacity);
+    ctx.fillText(s.text, s.x, s.y);
+    ctx.globalAlpha = 1;
+  });
+
+  particles.forEach(function(p) {
+    ctx.fillStyle = p.color;
+    ctx.globalAlpha = Math.max(0, p.life);
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.globalAlpha = 1;
+  });
+
+  // HUD
+  var total = totalThreats + totalBenign;
+  var accuracy = total > 0 ? ((correctCalls / total) * 100).toFixed(0) : '--';
+  var overlay = document.getElementById('overlay');
+  overlay.innerHTML = 'SESSION: ' + (sessionTime / 1000).toFixed(0) + 's<br>' +
+    'THREATS DECLARED: ' + totalThreats + '<br>' +
+    'BENIGN PASSED: ' + totalBenign + '<br>' +
+    'ACCURACY: ' + accuracy + '%<br>' +
+    'AUTOIMMUNE ERRORS: ' + autoimmune + '<br>' +
+    'DELEGATES: ' + delegates.length + '<br>' +
+    'PENDING CASES: ' + antigens.filter(function(a) { return !a.resolved; }).length;
+}
+
+initDelegates();
+spawnAntigen();
+
+var lastT = 0;
+function loop(t) {
+  var dt = lastT ? t - lastT : 16;
+  lastT = t;
+  update(t, dt);
+  draw(t);
+  requestAnimationFrame(loop);
+}
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>

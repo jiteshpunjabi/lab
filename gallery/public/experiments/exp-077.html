@@ -1,0 +1,521 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=1280,height=720">
+<title>Living Contours</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { width: 1280px; height: 720px; overflow: hidden; background: #0a1018; font-family: 'Courier New', monospace; }
+canvas { display: block; position: absolute; top: 0; left: 0; }
+#overlay { position: absolute; top: 0; left: 0; width: 1280px; height: 720px; pointer-events: none; }
+
+#title {
+  position: absolute; top: 14px; left: 20px;
+  color: #fff; font-size: 16px; font-weight: bold;
+  letter-spacing: 3px;
+  text-shadow: 0 1px 3px rgba(0,0,0,0.9);
+  z-index: 10;
+}
+#subtitle {
+  position: absolute; top: 34px; left: 20px;
+  color: rgba(255,240,200,0.85); font-size: 10px;
+  letter-spacing: 2px;
+  text-shadow: 0 1px 3px rgba(0,0,0,0.9);
+  z-index: 10;
+}
+
+#legend {
+  position: absolute; top: 16px; right: 16px;
+  background: rgba(18,24,36,0.82);
+  border: 1px solid rgba(255,230,150,0.4);
+  padding: 10px 12px;
+  color: #fff; font-size: 10px;
+  z-index: 10;
+  box-shadow: 0 2px 10px rgba(0,0,0,0.5);
+}
+#legend .lh { font-weight: bold; letter-spacing: 1px; margin-bottom: 6px; color: #ffe89a; }
+#legend .row { display: flex; align-items: center; margin: 2px 0; }
+#legend .sw { width: 28px; height: 10px; margin-right: 8px; border: 1px solid rgba(0,0,0,0.4); }
+
+#coords {
+  position: absolute; top: 16px; left: 50%; transform: translateX(-50%);
+  background: rgba(18,24,36,0.82);
+  border: 1px solid rgba(150,220,255,0.4);
+  padding: 6px 14px;
+  color: #c8f0ff; font-size: 11px;
+  letter-spacing: 1px;
+  z-index: 10;
+}
+
+#scalebar {
+  position: absolute; bottom: 18px; left: 20px;
+  color: #fff; font-size: 10px;
+  z-index: 10;
+  text-shadow: 0 1px 3px rgba(0,0,0,0.9);
+}
+#scalebar .bar {
+  display: flex; height: 8px; border: 1px solid #fff; margin-bottom: 3px;
+}
+#scalebar .bar div { width: 40px; height: 100%; }
+#scalebar .bar div:nth-child(odd) { background: #fff; }
+#scalebar .bar div:nth-child(even) { background: #000; }
+
+#compass {
+  position: absolute; bottom: 18px; right: 20px;
+  width: 54px; height: 54px;
+  border-radius: 50%;
+  background: rgba(18,24,36,0.82);
+  border: 1px solid rgba(255,230,150,0.5);
+  z-index: 10;
+  display: flex; align-items: center; justify-content: center;
+  color: #ffe89a; font-size: 9px; font-weight: bold;
+}
+#compass::before {
+  content: 'N';
+  position: absolute; top: 4px;
+}
+#compass::after {
+  content: ''; width: 2px; height: 22px;
+  background: linear-gradient(to bottom, #ff4444 50%, #fff 50%);
+  position: absolute;
+}
+
+#hint {
+  position: absolute; bottom: 18px; left: 50%; transform: translateX(-50%);
+  color: rgba(255,240,200,0.6); font-size: 10px;
+  letter-spacing: 2px; z-index: 10;
+  text-shadow: 0 1px 3px rgba(0,0,0,0.9);
+}
+</style>
+</head>
+<body>
+<canvas id="terrain" width="1280" height="720"></canvas>
+<canvas id="lines" width="1280" height="720"></canvas>
+
+<div id="title">LIVING CONTOURS</div>
+<div id="subtitle">HYPSOMETRIC SURVEY &#183; SHEET 077</div>
+
+<div id="legend">
+  <div class="lh">ELEVATION (m)</div>
+  <div class="row"><div class="sw" style="background:#f8f8ff"></div>4000+</div>
+  <div class="row"><div class="sw" style="background:#f4a040"></div>2500</div>
+  <div class="row"><div class="sw" style="background:#d8c060"></div>1500</div>
+  <div class="row"><div class="sw" style="background:#8ac060"></div>700</div>
+  <div class="row"><div class="sw" style="background:#3a9850"></div>200</div>
+  <div class="row"><div class="sw" style="background:#3060a0"></div>0</div>
+  <div class="row"><div class="sw" style="background:#0a2850"></div>-500</div>
+</div>
+
+<div id="coords">LAT 00.00&deg; N &#183; LON 00.00&deg; E &#183; ELEV 0000 m</div>
+
+<div id="scalebar">
+  <div class="bar"><div></div><div></div><div></div><div></div></div>
+  <div>0&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;50&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;100&nbsp;&nbsp;&nbsp;&nbsp;150&nbsp;&nbsp;km</div>
+</div>
+
+<div id="compass"></div>
+<div id="hint">MOVE &#183; BREATHE THE TERRAIN &nbsp;&nbsp; CLICK &#183; SPAWN PRESSURE SYSTEM</div>
+
+<script>
+(function() {
+  const W = 1280, H = 720;
+  const terrainCanvas = document.getElementById('terrain');
+  const linesCanvas = document.getElementById('lines');
+  const tctx = terrainCanvas.getContext('2d');
+  const lctx = linesCanvas.getContext('2d');
+
+  const GW = 128, GH = 72;
+  const cellW = W / (GW - 1);
+  const cellH = H / (GH - 1);
+
+  // Base elevation field (persistent terrain)
+  const base = new Float32Array(GW * GH);
+  // Dynamic field (rendered each frame: base + dome + pressure waves)
+  const field = new Float32Array(GW * GH);
+
+  // Generate base terrain using layered value noise
+  function hash(x, y) {
+    let h = Math.sin(x * 127.1 + y * 311.7) * 43758.5453;
+    return h - Math.floor(h);
+  }
+  function smooth(t) { return t * t * (3 - 2 * t); }
+  function vnoise(x, y) {
+    const xi = Math.floor(x), yi = Math.floor(y);
+    const xf = x - xi, yf = y - yi;
+    const a = hash(xi, yi);
+    const b = hash(xi + 1, yi);
+    const c = hash(xi, yi + 1);
+    const d = hash(xi + 1, yi + 1);
+    const u = smooth(xf), v = smooth(yf);
+    return a * (1 - u) * (1 - v) + b * u * (1 - v) + c * (1 - u) * v + d * u * v;
+  }
+  function fbm(x, y) {
+    let sum = 0, amp = 1, freq = 1, max = 0;
+    for (let i = 0; i < 6; i++) {
+      sum += amp * vnoise(x * freq, y * freq);
+      max += amp;
+      amp *= 0.5;
+      freq *= 2;
+    }
+    return sum / max;
+  }
+
+  // Build base terrain with continent + ridges
+  for (let j = 0; j < GH; j++) {
+    for (let i = 0; i < GW; i++) {
+      const nx = i / GW, ny = j / GH;
+      // Large continental shape
+      let e = fbm(nx * 2.8 + 3.1, ny * 2.8 + 7.2);
+      // Add mountain ridges (ridged noise)
+      let r = 1 - Math.abs(fbm(nx * 5.0 + 13.0, ny * 5.0 + 19.0) - 0.5) * 2;
+      e += r * 0.35;
+      // Sea shelf falloff at edges
+      const dx = nx - 0.5, dy = ny - 0.5;
+      const d = Math.sqrt(dx * dx + dy * dy);
+      e -= Math.max(0, d - 0.35) * 0.8;
+      // Remap to elevation in meters
+      base[j * GW + i] = (e - 0.55) * 6000; // -3300 to ~+3500
+    }
+  }
+
+  // Hypsometric color lookup
+  const palette = [
+    { e: -2000, c: [8, 22, 48] },
+    { e: -400,  c: [18, 50, 110] },
+    { e: -50,   c: [48, 96, 160] },
+    { e: 0,     c: [78, 140, 190] },
+    { e: 20,    c: [240, 230, 175] }, // beach
+    { e: 150,   c: [90, 170, 85] },
+    { e: 450,   c: [60, 150, 70] },
+    { e: 800,   c: [140, 180, 80] },
+    { e: 1300,  c: [210, 190, 95] },
+    { e: 1900,  c: [230, 155, 70] },
+    { e: 2500,  c: [200, 110, 55] },
+    { e: 3100,  c: [160, 90, 60] },
+    { e: 3700,  c: [200, 170, 160] },
+    { e: 4200,  c: [248, 248, 255] }
+  ];
+  function colorFor(e) {
+    if (e <= palette[0].e) return palette[0].c;
+    for (let i = 1; i < palette.length; i++) {
+      if (e <= palette[i].e) {
+        const p0 = palette[i - 1], p1 = palette[i];
+        const t = (e - p0.e) / (p1.e - p0.e);
+        return [
+          p0.c[0] + (p1.c[0] - p0.c[0]) * t,
+          p0.c[1] + (p1.c[1] - p0.c[1]) * t,
+          p0.c[2] + (p1.c[2] - p0.c[2]) * t
+        ];
+      }
+    }
+    return palette[palette.length - 1].c;
+  }
+
+  // Interactive state
+  let mouseX = W / 2, mouseY = H / 2;
+  let mouseOnCanvas = false;
+  const pressureSystems = []; // {x, y, sign, age, strength}
+
+  window.addEventListener('mousemove', (e) => {
+    const rect = terrainCanvas.getBoundingClientRect();
+    mouseX = (e.clientX - rect.left) * (W / rect.width);
+    mouseY = (e.clientY - rect.top) * (H / rect.height);
+    mouseOnCanvas = true;
+  });
+  window.addEventListener('mouseleave', () => { mouseOnCanvas = false; });
+
+  let clickToggle = 1;
+  terrainCanvas.addEventListener('click', (e) => {
+    const rect = terrainCanvas.getBoundingClientRect();
+    const cx = (e.clientX - rect.left) * (W / rect.width);
+    const cy = (e.clientY - rect.top) * (H / rect.height);
+    clickToggle *= -1;
+    pressureSystems.push({
+      x: cx, y: cy,
+      sign: clickToggle,
+      age: 0,
+      strength: 1.0
+    });
+    if (pressureSystems.length > 8) pressureSystems.shift();
+  });
+  // autoplay click once for demo / thumbnail
+  setTimeout(() => {
+    pressureSystems.push({ x: 420, y: 320, sign: 1, age: 0.3, strength: 1.0 });
+    pressureSystems.push({ x: 880, y: 430, sign: -1, age: 0.15, strength: 1.0 });
+  }, 50);
+
+  // Marching squares contour extraction
+  function drawContours(levels) {
+    lctx.clearRect(0, 0, W, H);
+    lctx.lineCap = 'round';
+    lctx.lineJoin = 'round';
+
+    const edges = new Array(16);
+    // lookup: for each config (0..15), which edges connect
+    // edges numbered: 0=top,1=right,2=bottom,3=left
+    const table = [
+      [], [[3,2]], [[2,1]], [[3,1]],
+      [[0,1]], [[3,0],[2,1]], [[0,2]], [[3,0]],
+      [[3,0]], [[0,2]], [[3,2],[0,1]], [[0,1]],
+      [[3,1]], [[2,1]], [[3,2]], []
+    ];
+
+    for (let lvIdx = 0; lvIdx < levels.length; lvIdx++) {
+      const level = levels[lvIdx];
+      const isIndex = (lvIdx % 4 === 0);
+      // Pick stroke based on level
+      const col = colorFor(level);
+      const darken = 0.42;
+      const r = Math.max(0, col[0] * darken);
+      const g = Math.max(0, col[1] * darken);
+      const b = Math.max(0, col[2] * darken);
+      lctx.strokeStyle = 'rgba(' + (r|0) + ',' + (g|0) + ',' + (b|0) + ',' + (isIndex ? 0.95 : 0.55) + ')';
+      lctx.lineWidth = isIndex ? 1.4 : 0.7;
+
+      lctx.beginPath();
+      for (let j = 0; j < GH - 1; j++) {
+        for (let i = 0; i < GW - 1; i++) {
+          const v0 = field[j * GW + i];         // TL
+          const v1 = field[j * GW + (i + 1)];   // TR
+          const v2 = field[(j + 1) * GW + (i + 1)]; // BR
+          const v3 = field[(j + 1) * GW + i];   // BL
+          let idx = 0;
+          if (v0 > level) idx |= 8;
+          if (v1 > level) idx |= 4;
+          if (v2 > level) idx |= 2;
+          if (v3 > level) idx |= 1;
+          if (idx === 0 || idx === 15) continue;
+          const segs = table[idx];
+          const x0 = i * cellW, y0 = j * cellH;
+          for (const s of segs) {
+            const p1 = edgePoint(s[0], v0, v1, v2, v3, level, x0, y0);
+            const p2 = edgePoint(s[1], v0, v1, v2, v3, level, x0, y0);
+            lctx.moveTo(p1[0], p1[1]);
+            lctx.lineTo(p2[0], p2[1]);
+          }
+        }
+      }
+      lctx.stroke();
+    }
+  }
+
+  function edgePoint(e, v0, v1, v2, v3, level, x0, y0) {
+    // edges: 0=top(v0->v1), 1=right(v1->v2), 2=bottom(v3->v2), 3=left(v0->v3)
+    let t;
+    if (e === 0) { t = (level - v0) / (v1 - v0); return [x0 + t * cellW, y0]; }
+    if (e === 1) { t = (level - v1) / (v2 - v1); return [x0 + cellW, y0 + t * cellH]; }
+    if (e === 2) { t = (level - v3) / (v2 - v3); return [x0 + t * cellW, y0 + cellH]; }
+    /* e === 3 */  t = (level - v0) / (v3 - v0); return [x0, y0 + t * cellH];
+  }
+
+  // Graticule (lat/lon grid)
+  function drawGraticule() {
+    lctx.strokeStyle = 'rgba(255, 245, 200, 0.14)';
+    lctx.lineWidth = 1;
+    lctx.setLineDash([2, 4]);
+    lctx.beginPath();
+    const gx = 8, gy = 6;
+    for (let i = 1; i < gx; i++) {
+      const x = (i / gx) * W;
+      lctx.moveTo(x, 0); lctx.lineTo(x, H);
+    }
+    for (let j = 1; j < gy; j++) {
+      const y = (j / gy) * H;
+      lctx.moveTo(0, y); lctx.lineTo(W, y);
+    }
+    lctx.stroke();
+    lctx.setLineDash([]);
+  }
+
+  // Elevation labels on index contours
+  function drawElevationLabels(levels) {
+    lctx.font = 'bold 10px "Courier New", monospace';
+    lctx.textAlign = 'center';
+    lctx.textBaseline = 'middle';
+    for (let lvIdx = 0; lvIdx < levels.length; lvIdx += 4) {
+      const level = levels[lvIdx];
+      // Find a few sample points along this contour
+      const samples = [];
+      for (let j = 2; j < GH - 2; j += 6) {
+        for (let i = 2; i < GW - 2; i += 10) {
+          const v = field[j * GW + i];
+          const vr = field[j * GW + (i + 1)];
+          if ((v - level) * (vr - level) < 0) {
+            const t = (level - v) / (vr - v);
+            samples.push([(i + t) * cellW, j * cellH]);
+          }
+        }
+      }
+      // Place up to 3 labels, spaced
+      const picked = [];
+      for (const s of samples) {
+        let ok = true;
+        for (const p of picked) {
+          if (Math.hypot(s[0] - p[0], s[1] - p[1]) < 220) { ok = false; break; }
+        }
+        if (ok) picked.push(s);
+        if (picked.length >= 3) break;
+      }
+      for (const p of picked) {
+        const txt = (level | 0) + ' m';
+        lctx.fillStyle = 'rgba(25, 15, 8, 0.88)';
+        const w = lctx.measureText(txt).width + 8;
+        lctx.fillRect(p[0] - w / 2, p[1] - 7, w, 14);
+        lctx.strokeStyle = 'rgba(255,230,170,0.6)';
+        lctx.lineWidth = 1;
+        lctx.strokeRect(p[0] - w / 2, p[1] - 7, w, 14);
+        lctx.fillStyle = '#ffe89a';
+        lctx.fillText(txt, p[0], p[1]);
+      }
+    }
+  }
+
+  // Draw pressure system markers (H/L) with dashed rings
+  function drawPressureSystems() {
+    for (const p of pressureSystems) {
+      const radius = 40 + p.age * 260;
+      const alpha = Math.max(0, 1 - p.age * 0.9);
+      lctx.save();
+      lctx.setLineDash([6, 5]);
+      lctx.lineWidth = 1.5;
+      // Multiple dashed rings
+      for (let k = 0; k < 3; k++) {
+        const rr = radius + k * 22;
+        lctx.strokeStyle = p.sign > 0
+          ? 'rgba(255, 70, 40, ' + (alpha * (0.7 - k * 0.18)) + ')'
+          : 'rgba(60, 150, 255, ' + (alpha * (0.7 - k * 0.18)) + ')';
+        lctx.beginPath();
+        lctx.arc(p.x, p.y, rr, 0, Math.PI * 2);
+        lctx.stroke();
+      }
+      lctx.setLineDash([]);
+      // H / L label
+      lctx.font = 'bold 28px "Courier New", monospace';
+      lctx.textAlign = 'center';
+      lctx.textBaseline = 'middle';
+      lctx.fillStyle = p.sign > 0 ? 'rgba(255, 80, 50, ' + alpha + ')' : 'rgba(80, 170, 255, ' + alpha + ')';
+      lctx.strokeStyle = 'rgba(0,0,0,' + alpha + ')';
+      lctx.lineWidth = 3;
+      const lbl = p.sign > 0 ? 'H' : 'L';
+      lctx.strokeText(lbl, p.x, p.y);
+      lctx.fillText(lbl, p.x, p.y);
+      lctx.restore();
+    }
+  }
+
+  // Render terrain as filled raster using ImageData
+  const img = tctx.createImageData(W, H);
+  function renderTerrain() {
+    // Bilinear sample the field into pixel buffer
+    const data = img.data;
+    for (let y = 0; y < H; y++) {
+      const fy = (y / H) * (GH - 1);
+      const j0 = Math.floor(fy), j1 = Math.min(GH - 1, j0 + 1);
+      const ty = fy - j0;
+      for (let x = 0; x < W; x++) {
+        const fx = (x / W) * (GW - 1);
+        const i0 = Math.floor(fx), i1 = Math.min(GW - 1, i0 + 1);
+        const tx = fx - i0;
+        const v00 = field[j0 * GW + i0];
+        const v10 = field[j0 * GW + i1];
+        const v01 = field[j1 * GW + i0];
+        const v11 = field[j1 * GW + i1];
+        const e = v00 * (1 - tx) * (1 - ty) + v10 * tx * (1 - ty) + v01 * (1 - tx) * ty + v11 * tx * ty;
+        const col = colorFor(e);
+        // Fake hillshade from x-gradient
+        const gx = (v10 - v00);
+        const gy = (v01 - v00);
+        const shade = 1 + Math.max(-0.35, Math.min(0.35, (gx + gy) * 0.0009));
+        const idx = (y * W + x) * 4;
+        data[idx]     = Math.max(0, Math.min(255, col[0] * shade));
+        data[idx + 1] = Math.max(0, Math.min(255, col[1] * shade));
+        data[idx + 2] = Math.max(0, Math.min(255, col[2] * shade));
+        data[idx + 3] = 255;
+      }
+    }
+    tctx.putImageData(img, 0, 0);
+  }
+
+  // Build field = base + dome + pressure waves
+  function updateField(t) {
+    // breathing phase
+    const breath = Math.sin(t * 0.6) * 80;
+
+    // mouse in grid coords
+    const mgx = (mouseX / W) * (GW - 1);
+    const mgy = (mouseY / H) * (GH - 1);
+    const domeR = 14; // grid units
+    const domeAmp = mouseOnCanvas ? 900 : 0;
+
+    for (let j = 0; j < GH; j++) {
+      for (let i = 0; i < GW; i++) {
+        let e = base[j * GW + i];
+        // breathing everywhere
+        e += breath * 0.35 * Math.sin(i * 0.22 + j * 0.18 + t * 0.5);
+        // mouse dome (gaussian)
+        if (domeAmp > 0) {
+          const dx = i - mgx, dy = j - mgy;
+          const d2 = dx * dx + dy * dy;
+          e += domeAmp * Math.exp(-d2 / (2 * domeR * domeR));
+        }
+        // pressure systems: expanding ring wave
+        for (const p of pressureSystems) {
+          const pgx = (p.x / W) * (GW - 1);
+          const pgy = (p.y / H) * (GH - 1);
+          const dx = i - pgx, dy = j - pgy;
+          const d = Math.sqrt(dx * dx + dy * dy);
+          const ringR = 4 + p.age * 35;
+          const ringW = 6;
+          const env = Math.exp(-((d - ringR) * (d - ringR)) / (2 * ringW * ringW));
+          const fade = Math.max(0, 1 - p.age * 0.6);
+          e += p.sign * 1600 * env * fade;
+          // plus a slowly-decaying core dome
+          const coreR = 9;
+          e += p.sign * 700 * fade * Math.exp(-(d * d) / (2 * coreR * coreR));
+        }
+        field[j * GW + i] = e;
+      }
+    }
+  }
+
+  // Build level set
+  const levels = [];
+  for (let lv = -2500; lv <= 4500; lv += 175) levels.push(lv);
+
+  const coordsEl = document.getElementById('coords');
+
+  let startT = performance.now();
+  function frame(now) {
+    const t = (now - startT) / 1000;
+    updateField(t);
+    renderTerrain();
+    drawGraticule();
+    drawContours(levels);
+    drawElevationLabels(levels);
+    drawPressureSystems();
+
+    // update pressure system ages
+    for (const p of pressureSystems) p.age += 0.012;
+    for (let i = pressureSystems.length - 1; i >= 0; i--) {
+      if (pressureSystems[i].age > 2.2) pressureSystems.splice(i, 1);
+    }
+
+    // coord readout
+    if (mouseOnCanvas) {
+      const fx = (mouseX / W) * (GW - 1);
+      const fy = (mouseY / H) * (GH - 1);
+      const i0 = Math.floor(fx), j0 = Math.floor(fy);
+      const e = field[j0 * GW + i0] || 0;
+      const lat = (1 - mouseY / H) * 80 - 20;
+      const lon = (mouseX / W) * 180 - 30;
+      coordsEl.innerHTML = 'LAT ' + lat.toFixed(2) + '&deg; N &middot; LON ' + lon.toFixed(2) + '&deg; E &middot; ELEV ' + (e | 0) + ' m';
+    }
+
+    requestAnimationFrame(frame);
+  }
+  requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>

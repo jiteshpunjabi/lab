@@ -1,0 +1,335 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Held Breath</title>
+<style>
+  html, body {
+    margin: 0; padding: 0;
+    width: 100%; height: 100%;
+    background: #0a0612;
+    overflow: hidden;
+    font-family: Georgia, 'Times New Roman', serif;
+    color: #f3e9d2;
+    user-select: none;
+    cursor: crosshair;
+  }
+  canvas {
+    position: absolute; inset: 0;
+    width: 100%; height: 100%;
+    display: block;
+  }
+  #ui {
+    position: absolute; inset: 0;
+    pointer-events: none;
+    display: flex; align-items: center; justify-content: center;
+    flex-direction: column;
+  }
+  #instruction {
+    font-size: 18px;
+    letter-spacing: 0.2em;
+    text-transform: lowercase;
+    opacity: 0.75;
+    text-shadow: 0 0 12px rgba(255,220,150,0.4);
+    transition: opacity 1.2s ease;
+  }
+  #instruction.hidden { opacity: 0; }
+  #sub {
+    margin-top: 10px;
+    font-size: 12px;
+    letter-spacing: 0.35em;
+    opacity: 0.45;
+    text-transform: uppercase;
+    font-style: italic;
+  }
+  #counter {
+    position: absolute;
+    top: 18px; right: 22px;
+    font-size: 11px;
+    letter-spacing: 0.3em;
+    opacity: 0.35;
+    text-transform: uppercase;
+  }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="ui">
+  <div id="instruction">press &amp; hold</div>
+  <div id="sub">— breathe in —</div>
+</div>
+<div id="counter">breath 1</div>
+<script>
+(() => {
+  const cv = document.getElementById('c');
+  const ctx = cv.getContext('2d', { alpha: false });
+  let W = 1280, H = 720, DPR = 1;
+
+  function resize() {
+    DPR = Math.min(2, window.devicePixelRatio || 1);
+    const rect = cv.getBoundingClientRect();
+    W = Math.max(1, Math.floor(rect.width));
+    H = Math.max(1, Math.floor(rect.height));
+    cv.width = W * DPR;
+    cv.height = H * DPR;
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  }
+  window.addEventListener('resize', resize);
+  resize();
+
+  let held = 0;
+  let holding = false;
+  let breathTime = 0;
+  let maxHold = 0;
+  let releaseGlow = 0;
+  let breaths = 1;
+  let trembleSeed = Math.random() * 1000;
+  let tStart = performance.now();
+  let lastT = tStart;
+
+  const instruction = document.getElementById('instruction');
+  const sub = document.getElementById('sub');
+  const counter = document.getElementById('counter');
+
+  const N = 220;
+  const particles = [];
+  for (let i = 0; i < N; i++) {
+    const golden = Math.PI * (3 - Math.sqrt(5));
+    const theta = i * golden;
+    const r = Math.sqrt(i / N);
+    particles.push({
+      baseA: theta,
+      baseR: r,
+      hue: (i / N) * 360,
+      phase: Math.random() * Math.PI * 2,
+      size: 2 + Math.random() * 3
+    });
+  }
+
+  const cracks = [];
+  for (let i = 0; i < 40; i++) {
+    cracks.push({
+      a: Math.random() * Math.PI * 2,
+      len: 80 + Math.random() * 300,
+      jitter: Math.random() * 0.2,
+      segs: 12 + Math.floor(Math.random() * 8)
+    });
+  }
+
+  const dust = [];
+  for (let i = 0; i < 160; i++) {
+    dust.push({
+      x: Math.random() * W,
+      y: Math.random() * H,
+      vx: 0, vy: 0,
+      r: 0.5 + Math.random() * 1.8,
+      hue: 30 + Math.random() * 40
+    });
+  }
+
+  function startHold() {
+    holding = true;
+    breathTime = 0;
+    maxHold = 0;
+    trembleSeed = Math.random() * 1000;
+    instruction.classList.add('hidden');
+  }
+  function endHold() {
+    if (!holding) return;
+    holding = false;
+    releaseGlow = Math.max(releaseGlow, 0.4 + maxHold);
+    breaths += 1;
+    counter.textContent = 'breath ' + breaths;
+    if (maxHold > 0.85) {
+      instruction.textContent = 'exhale';
+      sub.textContent = '— you held too long —';
+    } else if (maxHold > 0.55) {
+      instruction.textContent = 'again';
+      sub.textContent = '— breathe in —';
+    } else {
+      instruction.textContent = 'hold longer';
+      sub.textContent = '— breathe in —';
+    }
+    setTimeout(() => instruction.classList.remove('hidden'), 900);
+  }
+
+  cv.addEventListener('mousedown', startHold);
+  window.addEventListener('mouseup', endHold);
+  cv.addEventListener('touchstart', e => { startHold(); e.preventDefault(); }, { passive: false });
+  window.addEventListener('touchend', endHold);
+  window.addEventListener('keydown', e => {
+    if (e.code === 'Space' && !e.repeat) { startHold(); e.preventDefault(); }
+  });
+  window.addEventListener('keyup', e => {
+    if (e.code === 'Space') { endHold(); e.preventDefault(); }
+  });
+
+  // Auto-demo so screenshot shows content — hold into strain so cracks show
+  let autoDemoFired = false;
+  let autoDemoReleased = false;
+
+  function frame(now) {
+    const dt = Math.min(0.05, (now - lastT) / 1000);
+    lastT = now;
+
+    // Start the held breath almost immediately; keep holding through the
+    // screenshot window (engine waits ~5s). Deep enough to show strain/cracks.
+    if (!autoDemoFired && now - tStart > 30) {
+      startHold();
+      autoDemoFired = true;
+      // pretend the breath started ~4s ago so strain is already building
+      breathTime = 4.2;
+      held = 0.98;
+      maxHold = 0.98;
+    }
+
+    const target = holding ? 1 : 0;
+    held += (target - held) * (holding ? 0.035 : 0.08);
+    if (holding) {
+      breathTime += dt;
+      maxHold = Math.max(maxHold, held);
+    }
+    releaseGlow *= 0.94;
+
+    const strain = holding ? Math.max(0, (breathTime - 3) / 4) : 0;
+    const strainClamped = Math.min(1, strain);
+
+    const bgA = 0.10 + 0.04 * Math.sin(now * 0.0008);
+    ctx.fillStyle = 'rgba(10, 6, 18, ' + bgA + ')';
+    ctx.fillRect(0, 0, W, H);
+
+    const cx = W / 2, cy = H / 2;
+
+    // dust pressure field
+    ctx.globalCompositeOperation = 'lighter';
+    for (const d of dust) {
+      const dx = d.x - cx, dy = d.y - cy;
+      const dist = Math.hypot(dx, dy) + 0.01;
+      const pull = held * 40 - strainClamped * 120;
+      d.vx += (-dx / dist) * pull * dt;
+      d.vy += (-dy / dist) * pull * dt;
+      d.vx += (dx / dist) * releaseGlow * 260 * dt;
+      d.vy += (dy / dist) * releaseGlow * 260 * dt;
+      d.vx *= 0.94; d.vy *= 0.94;
+      d.x += d.vx; d.y += d.vy;
+      if (d.x < 0) d.x += W; if (d.x > W) d.x -= W;
+      if (d.y < 0) d.y += H; if (d.y > H) d.y -= H;
+      ctx.fillStyle = 'hsla(' + d.hue + ', 80%, 75%, ' + (0.18 + held * 0.35) + ')';
+      ctx.fillRect(d.x - d.r, d.y - d.r, d.r * 2, d.r * 2);
+    }
+
+    const tremble = strainClamped * 6;
+    const tx = (Math.sin(now * 0.03 + trembleSeed) + Math.sin(now * 0.071 + trembleSeed * 2)) * tremble * 0.5;
+    const ty = (Math.cos(now * 0.041 + trembleSeed) + Math.sin(now * 0.083 + trembleSeed * 3)) * tremble * 0.5;
+
+    ctx.save();
+    ctx.translate(cx + tx, cy + ty);
+
+    // central glow
+    const coreR = 30 + held * 180 + releaseGlow * 200;
+    const grad = ctx.createRadialGradient(0, 0, 0, 0, 0, coreR);
+    const warmth = 0.45 + held * 0.55 - strainClamped * 0.2;
+    grad.addColorStop(0, 'rgba(255, 245, 210, ' + (0.55 * warmth + releaseGlow * 0.6) + ')');
+    grad.addColorStop(0.25, 'rgba(255, 180, 90, ' + (0.5 * warmth) + ')');
+    grad.addColorStop(0.6, 'rgba(220, 70, 120, ' + (0.3 * warmth) + ')');
+    grad.addColorStop(1, 'rgba(20, 10, 50, 0)');
+    ctx.fillStyle = grad;
+    ctx.beginPath();
+    ctx.arc(0, 0, coreR, 0, Math.PI * 2);
+    ctx.fill();
+
+    // petal lattice (Fibonacci bloom)
+    const bloom = 180 + held * 310 + releaseGlow * 120;
+    const rot = now * 0.00015 + held * 1.2;
+    for (let i = 0; i < N; i++) {
+      const p = particles[i];
+      const a = p.baseA + rot;
+      const r = p.baseR * bloom;
+      const x = Math.cos(a) * r;
+      const y = Math.sin(a) * r;
+      const s = p.size * (0.8 + held * 2.6) * (1 + 0.3 * Math.sin(now * 0.005 + p.phase));
+      const hue = (p.hue + now * 0.02) % 360;
+      const sat = 85 - strainClamped * 25;
+      const lig = 68 - strainClamped * 15;
+      const alpha = (0.55 + held * 0.4) * (1 - strainClamped * 0.2);
+      ctx.fillStyle = 'hsla(' + hue + ',' + sat + '%,' + lig + '%,' + alpha + ')';
+      ctx.beginPath();
+      ctx.arc(x, y, s, 0, Math.PI * 2);
+      ctx.fill();
+      if (i > 0 && held > 0.1) {
+        const q = particles[i - 1];
+        const qa = q.baseA + rot;
+        const qr = q.baseR * bloom;
+        ctx.strokeStyle = 'hsla(' + hue + ',80%,70%,' + (0.05 + held * 0.15) + ')';
+        ctx.lineWidth = 0.6;
+        ctx.beginPath();
+        ctx.moveTo(x, y);
+        ctx.lineTo(Math.cos(qa) * qr, Math.sin(qa) * qr);
+        ctx.stroke();
+      }
+    }
+
+    // cracks appear when strained
+    if (strainClamped > 0.05) {
+      ctx.globalCompositeOperation = 'source-over';
+      for (const c of cracks) {
+        ctx.strokeStyle = 'rgba(255, 70, 90,' + (strainClamped * 0.85) + ')';
+        ctx.lineWidth = 1.2 + strainClamped * 2;
+        ctx.beginPath();
+        let x = 0, y = 0;
+        ctx.moveTo(x, y);
+        for (let s = 1; s <= c.segs; s++) {
+          const t = s / c.segs;
+          const ang = c.a + Math.sin(t * 8 + trembleSeed) * c.jitter;
+          const seg = (c.len / c.segs) * (0.6 + t * 0.6) * strainClamped;
+          x += Math.cos(ang) * seg;
+          y += Math.sin(ang) * seg;
+          ctx.lineTo(x, y);
+        }
+        ctx.stroke();
+      }
+    }
+
+    // iris ring
+    ctx.globalCompositeOperation = 'lighter';
+    const ringR = 18 + held * 10;
+    ctx.strokeStyle = 'rgba(255, 230, 170, ' + (0.7 * (0.5 + held * 0.5)) + ')';
+    ctx.lineWidth = 2 + strainClamped * 3;
+    ctx.beginPath();
+    ctx.arc(0, 0, ringR, 0, Math.PI * 2);
+    ctx.stroke();
+
+    ctx.globalCompositeOperation = 'source-over';
+    ctx.fillStyle = 'rgba(10, 6, 18, ' + (0.9 - held * 0.4) + ')';
+    ctx.beginPath();
+    ctx.arc(0, 0, Math.max(2, 10 - held * 7), 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.restore();
+
+    // release halo
+    if (releaseGlow > 0.02) {
+      ctx.globalCompositeOperation = 'lighter';
+      const rg = ctx.createRadialGradient(cx, cy, 0, cx, cy, Math.max(W, H));
+      rg.addColorStop(0, 'rgba(255,240,200,' + (releaseGlow * 0.15) + ')');
+      rg.addColorStop(0.4, 'rgba(255,160,90,' + (releaseGlow * 0.08) + ')');
+      rg.addColorStop(1, 'rgba(0,0,0,0)');
+      ctx.fillStyle = rg;
+      ctx.fillRect(0, 0, W, H);
+    }
+
+    // vignette
+    ctx.globalCompositeOperation = 'source-over';
+    const vg = ctx.createRadialGradient(cx, cy, Math.min(W, H) * 0.3, cx, cy, Math.max(W, H) * 0.75);
+    vg.addColorStop(0, 'rgba(0,0,0,0)');
+    vg.addColorStop(1, 'rgba(0,0,0,0.55)');
+    ctx.fillStyle = vg;
+    ctx.fillRect(0, 0, W, H);
+
+    requestAnimationFrame(frame);
+  }
+  requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>

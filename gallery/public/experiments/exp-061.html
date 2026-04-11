@@ -1,0 +1,406 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Desire Paths — exp-061</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    width: 1280px; height: 720px; overflow: hidden;
+    background: #1a3a1a;
+    font-family: Georgia, serif;
+    cursor: none;
+  }
+
+  #garden {
+    position: absolute; width: 100%; height: 100%;
+    background:
+      repeating-linear-gradient(90deg, transparent, transparent 3px, rgba(34,120,34,0.08) 3px, rgba(34,120,34,0.08) 4px),
+      repeating-linear-gradient(0deg, transparent, transparent 5px, rgba(40,100,30,0.06) 5px, rgba(40,100,30,0.06) 6px),
+      radial-gradient(ellipse at 30% 40%, #2d6b2d, transparent 60%),
+      radial-gradient(ellipse at 70% 60%, #256325, transparent 60%),
+      linear-gradient(135deg, #1f4f1f, #2a5a2a, #1a3a1a);
+  }
+
+  .walkway {
+    position: absolute;
+    background: repeating-linear-gradient(
+      var(--walk-angle, 0deg),
+      #b8a088, #b8a088 4px,
+      #a89078 4px, #a89078 8px
+    );
+    box-shadow: inset 0 0 8px rgba(0,0,0,0.3);
+    border-radius: 2px;
+    transition: opacity 4s ease;
+    z-index: 1;
+  }
+
+  .walkway.h-main { left: 0; top: 340px; width: 1280px; height: 40px; --walk-angle: 90deg; }
+  .walkway.v-main { left: 620px; top: 0; width: 40px; height: 720px; --walk-angle: 0deg; }
+  .walkway.diag1 { left: 200px; top: 100px; width: 300px; height: 30px; transform: rotate(35deg); --walk-angle: 90deg; }
+  .walkway.diag2 { left: 780px; top: 480px; width: 280px; height: 30px; transform: rotate(-25deg); --walk-angle: 90deg; }
+  .walkway.connect1 { left: 300px; top: 500px; width: 200px; height: 25px; --walk-angle: 90deg; }
+  .walkway.connect2 { left: 800px; top: 180px; width: 25px; height: 200px; --walk-angle: 0deg; }
+
+  .poi {
+    position: absolute;
+    border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 28px;
+    z-index: 5;
+    animation: poi-glow 3s ease-in-out infinite alternate;
+    color: white;
+    text-shadow: 0 0 6px rgba(0,0,0,0.5);
+  }
+  @keyframes poi-glow {
+    0% { filter: brightness(0.9) drop-shadow(0 0 4px rgba(255,220,100,0.3)); }
+    100% { filter: brightness(1.15) drop-shadow(0 0 14px rgba(255,220,100,0.7)); }
+  }
+  .poi.fountain { left: 100px; top: 80px; width: 70px; height: 70px; background: radial-gradient(circle, #4a9fdf, #2a6faf); border: 3px solid #6abfff; }
+  .poi.bench { left: 1100px; top: 120px; width: 60px; height: 60px; background: radial-gradient(circle, #8B6914, #6B4914); border: 3px solid #AB8934; }
+  .poi.flowers { left: 180px; top: 580px; width: 65px; height: 65px; background: radial-gradient(circle, #d94080, #a93060); border: 3px solid #f960a0; }
+  .poi.statue { left: 1050px; top: 550px; width: 60px; height: 60px; background: radial-gradient(circle, #909090, #606060); border: 3px solid #b0b0b0; }
+  .poi.tree { left: 550px; top: 150px; width: 75px; height: 75px; background: radial-gradient(circle, #2d8b2d, #1d5b1d); border: 3px solid #4dab4d; }
+  .poi.cafe { left: 400px; top: 620px; width: 55px; height: 55px; background: radial-gradient(circle, #c4781e, #945818); border: 3px solid #e49838; }
+
+  #trails {
+    position: absolute; top: 0; left: 0; width: 1280px; height: 720px;
+    z-index: 2;
+    pointer-events: none;
+  }
+
+  #cursor {
+    position: absolute; z-index: 100; pointer-events: none;
+    width: 20px; height: 20px;
+    border-radius: 50%;
+    background: radial-gradient(circle, rgba(255,255,200,0.9), rgba(255,255,200,0) 70%);
+    box-shadow: 0 0 12px rgba(255,255,200,0.6);
+    transform: translate(-50%, -50%);
+  }
+
+  #info {
+    position: absolute; top: 16px; left: 16px; z-index: 50;
+    color: rgba(200,230,200,0.8);
+    font-size: 13px;
+    line-height: 1.7;
+    pointer-events: none;
+    text-shadow: 0 1px 4px rgba(0,0,0,0.9);
+  }
+  #info .title {
+    font-size: 22px;
+    color: rgba(230,245,210,0.9);
+    letter-spacing: 3px;
+    margin-bottom: 4px;
+    font-variant: small-caps;
+  }
+  #info .visits {
+    font-style: italic;
+    color: rgba(255,220,150,0.75);
+  }
+  #info .subtitle {
+    font-size: 11px;
+    color: rgba(200,230,200,0.5);
+    margin-top: 2px;
+  }
+
+  .blade {
+    position: absolute;
+    width: 2px;
+    background: linear-gradient(to top, transparent, currentColor);
+    transform-origin: bottom center;
+    z-index: 1;
+    pointer-events: none;
+  }
+
+  @keyframes sway {
+    0% { transform: rotate(-8deg); }
+    100% { transform: rotate(8deg); }
+  }
+</style>
+</head>
+<body>
+<div id="garden">
+  <div class="walkway h-main"></div>
+  <div class="walkway v-main"></div>
+  <div class="walkway diag1"></div>
+  <div class="walkway diag2"></div>
+  <div class="walkway connect1"></div>
+  <div class="walkway connect2"></div>
+
+  <div class="poi fountain">&#9832;</div>
+  <div class="poi bench">&#9878;</div>
+  <div class="poi flowers">&#10048;</div>
+  <div class="poi statue">&#9816;</div>
+  <div class="poi tree">&#9752;</div>
+  <div class="poi cafe">&#9749;</div>
+</div>
+
+<canvas id="trails" width="1280" height="720"></canvas>
+<div id="cursor"></div>
+
+<div id="info">
+  <div class="title">Desire Paths</div>
+  <div id="visit-info" class="visits"></div>
+  <div id="path-info"></div>
+  <div class="subtitle">Move to wear paths through the grass</div>
+</div>
+
+<script>
+(function() {
+  const canvas = document.getElementById('trails');
+  const ctx = canvas.getContext('2d');
+  const cursor = document.getElementById('cursor');
+  const GRID = 6;
+  const COLS = Math.ceil(1280 / GRID);
+  const ROWS = Math.ceil(720 / GRID);
+  const STORAGE_KEY = 'desire-paths-v2';
+
+  let state = loadState();
+
+  function loadState() {
+    try {
+      const saved = localStorage.getItem(STORAGE_KEY);
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        parsed.visits = (parsed.visits || 0) + 1;
+        parsed.lastVisit = Date.now();
+        // Decay old paths slightly — grass grows back slowly
+        const hoursSinceLast = (Date.now() - (parsed.lastVisit || Date.now())) / 3600000;
+        const decay = Math.min(0.3, hoursSinceLast * 0.01);
+        if (decay > 0.01) {
+          for (let i = 0; i < parsed.grid.length; i++) {
+            parsed.grid[i] = Math.max(0, parsed.grid[i] - decay * parsed.grid[i]);
+          }
+        }
+        return parsed;
+      }
+    } catch(e) {}
+    return {
+      grid: new Array(COLS * ROWS).fill(0),
+      visits: 1,
+      firstVisit: Date.now(),
+      lastVisit: Date.now(),
+      totalDistance: 0
+    };
+  }
+
+  function saveState() {
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+    } catch(e) {}
+  }
+
+  // Visit info
+  const visitInfo = document.getElementById('visit-info');
+  const pathInfo = document.getElementById('path-info');
+  if (state.visits === 1) {
+    visitInfo.textContent = 'First visit \u2014 the grass is untouched';
+  } else {
+    const daysSince = Math.floor((Date.now() - state.firstVisit) / 86400000);
+    visitInfo.textContent = 'Visit #' + state.visits + (daysSince > 0 ? ' \u2014 ' + daysSince + ' day' + (daysSince > 1 ? 's' : '') + ' of wear' : ' \u2014 paths forming');
+  }
+
+  // Erode walkways based on visits
+  const walkways = document.querySelectorAll('.walkway');
+  const erosionFactor = Math.min(0.75, 0.15 + state.visits * 0.06);
+  walkways.forEach(function(w) {
+    w.style.opacity = 1 - erosionFactor;
+  });
+
+  // Add grass blades
+  const garden = document.getElementById('garden');
+  for (let i = 0; i < 120; i++) {
+    const blade = document.createElement('div');
+    blade.className = 'blade';
+    const x = Math.random() * 1280;
+    const y = Math.random() * 720;
+    const h = 8 + Math.random() * 16;
+    const hue = 95 + Math.random() * 45;
+    const lightness = 22 + Math.random() * 18;
+    blade.style.cssText =
+      'left:' + x + 'px;top:' + y + 'px;height:' + h + 'px;' +
+      'color:hsl(' + hue + ',40%,' + lightness + '%);' +
+      'animation:sway ' + (2 + Math.random() * 3) + 's ease-in-out ' + (Math.random() * 2) + 's infinite alternate;' +
+      'opacity:0.7;';
+    garden.appendChild(blade);
+  }
+
+  // Render paths
+  function renderPaths() {
+    ctx.clearRect(0, 0, 1280, 720);
+
+    for (let i = 0; i < state.grid.length; i++) {
+      const wear = state.grid[i];
+      if (wear < 0.5) continue;
+
+      const col = i % COLS;
+      const row = Math.floor(i / COLS);
+      const x = col * GRID;
+      const y = row * GRID;
+
+      const intensity = Math.min(wear / 25, 1);
+      const alpha = intensity * 0.55;
+
+      // Worn earth tones — warm amber for deep paths, lighter tan for new
+      const r = Math.floor(140 + intensity * 100);
+      const g = Math.floor(95 + intensity * 60);
+      const b = Math.floor(30 + intensity * 25);
+
+      ctx.fillStyle = 'rgba(' + r + ',' + g + ',' + b + ',' + (alpha + 0.1) + ')';
+      const spread = intensity * 3.5;
+      ctx.beginPath();
+      ctx.ellipse(x + GRID/2, y + GRID/2, GRID/2 + spread, GRID/2 + spread, 0, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+
+  renderPaths();
+
+  // Mouse tracking
+  let lastX = -1, lastY = -1;
+  let saveTimer = null;
+  let hasMouse = false;
+
+  function stamp(mx, my) {
+    const col = Math.floor(mx / GRID);
+    const row = Math.floor(my / GRID);
+    if (col < 0 || col >= COLS || row < 0 || row >= ROWS) return;
+
+    for (let dy = -1; dy <= 1; dy++) {
+      for (let dx = -1; dx <= 1; dx++) {
+        const c = col + dx;
+        const r = row + dy;
+        if (c < 0 || c >= COLS || r < 0 || r >= ROWS) continue;
+        const idx = r * COLS + c;
+        const dist = Math.sqrt(dx*dx + dy*dy);
+        const falloff = dist === 0 ? 1 : 0.35;
+        state.grid[idx] = Math.min(50, state.grid[idx] + falloff * 0.7);
+      }
+    }
+  }
+
+  function interpolateStamp(x1, y1, x2, y2) {
+    const dx = x2 - x1;
+    const dy = y2 - y1;
+    const dist = Math.sqrt(dx*dx + dy*dy);
+    const steps = Math.max(1, Math.floor(dist / (GRID * 0.4)));
+
+    for (let i = 0; i <= steps; i++) {
+      const t = i / steps;
+      stamp(x1 + dx * t, y1 + dy * t);
+    }
+    state.totalDistance += dist;
+  }
+
+  document.addEventListener('mousemove', function(e) {
+    hasMouse = true;
+    var mx = e.clientX;
+    var my = e.clientY;
+
+    cursor.style.left = mx + 'px';
+    cursor.style.top = my + 'px';
+
+    if (lastX >= 0) {
+      interpolateStamp(lastX, lastY, mx, my);
+      renderPaths();
+      clearTimeout(saveTimer);
+      saveTimer = setTimeout(saveState, 500);
+    }
+    lastX = mx;
+    lastY = my;
+  });
+
+  // Info update
+  setInterval(function() {
+    var wornCells = 0, deepPaths = 0;
+    for (var i = 0; i < state.grid.length; i++) {
+      if (state.grid[i] > 3) wornCells++;
+      if (state.grid[i] > 18) deepPaths++;
+    }
+    var info = '';
+    if (wornCells > 0) {
+      info = wornCells + ' patches worn';
+      if (deepPaths > 0) info += ' \u00b7 ' + deepPaths + ' deep trails';
+      var dist = Math.floor(state.totalDistance / 100);
+      if (dist > 0) info += ' \u00b7 ' + dist + 'm walked';
+    }
+    pathInfo.textContent = info;
+  }, 1000);
+
+  // Phantom walkers for screenshot / first visit
+  function animatePhantomWalker(x1, y1, x2, y2, duration, wobble) {
+    var startTime = performance.now();
+    function step(now) {
+      var elapsed = now - startTime;
+      var t = Math.min(1, elapsed / duration);
+      // Organic wobble
+      var bend = Math.sin(t * Math.PI) * (wobble || 30);
+      var perpX = -(y2 - y1);
+      var perpY = (x2 - x1);
+      var len = Math.sqrt(perpX*perpX + perpY*perpY) || 1;
+      var cx = x1 + (x2 - x1) * t + (perpX / len) * bend;
+      var cy = y1 + (y2 - y1) * t + (perpY / len) * bend;
+      // Add micro-wobble for footstep feel
+      cx += Math.sin(t * 40) * 3;
+      cy += Math.cos(t * 40) * 3;
+      stamp(cx, cy);
+      if (t < 1) {
+        requestAnimationFrame(step);
+      } else {
+        renderPaths();
+        saveState();
+      }
+    }
+    requestAnimationFrame(step);
+    var renderInt = setInterval(function() { renderPaths(); }, 80);
+    setTimeout(function() { clearInterval(renderInt); }, duration + 200);
+  }
+
+  // Pre-stamp desire paths immediately so they're visible on load / screenshot
+  function stampPath(x1, y1, x2, y2, wobbleAmt, passes) {
+    for (var p = 0; p < (passes || 3); p++) {
+      var steps = 200;
+      for (var i = 0; i <= steps; i++) {
+        var t = i / steps;
+        var bend = Math.sin(t * Math.PI) * (wobbleAmt || 30);
+        var perpX = -(y2 - y1);
+        var perpY = (x2 - x1);
+        var len = Math.sqrt(perpX*perpX + perpY*perpY) || 1;
+        var cx = x1 + (x2 - x1) * t + (perpX / len) * bend;
+        var cy = y1 + (y2 - y1) * t + (perpY / len) * bend;
+        // Micro-wobble for organic feel — different per pass
+        cx += Math.sin(t * 40 + p * 7) * 4;
+        cy += Math.cos(t * 40 + p * 5) * 4;
+        stamp(cx, cy);
+      }
+    }
+  }
+
+  // The classic desire paths — shortcuts people ACTUALLY take
+  // 1. Fountain -> Tree (diagonal shortcut, ignoring the designed walkways)
+  stampPath(135, 130, 575, 185, 40, 4);
+  // 2. Flowers -> Cafe (straight instead of the L-shaped walkway route)
+  stampPath(215, 610, 425, 648, 18, 3);
+  // 3. The BIG diagonal — corner to corner, the most-walked desire path
+  stampPath(130, 180, 1060, 570, 55, 5);
+  // 4. Bench -> Statue shortcut (straight down instead of via walkways)
+  stampPath(1130, 160, 1075, 560, 30, 4);
+  // 5. Tree -> center intersection
+  stampPath(585, 200, 640, 340, 12, 3);
+  // 6. Cafe -> Statue (another diagonal shortcut)
+  stampPath(430, 645, 1050, 575, 35, 3);
+
+  renderPaths();
+  saveState();
+
+  // Also animate new paths when the user moves, plus phantom walkers over time
+  setTimeout(function() {
+    animatePhantomWalker(300, 50, 850, 650, 4000, 45);
+  }, 3000);
+
+  window.addEventListener('beforeunload', saveState);
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,420 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=1280,height=720">
+<title>exp-057 — Tip of the Tongue</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { background: #0a0a1a; overflow: hidden; cursor: none; width: 1280px; height: 720px; }
+canvas { display: block; }
+#cursor {
+  position: fixed; pointer-events: none; z-index: 100;
+  width: 24px; height: 24px; border-radius: 50%;
+  border: 2px solid rgba(255,180,100,0.6);
+  transform: translate(-50%, -50%);
+  transition: width 0.3s, height 0.3s;
+}
+#hint {
+  position: fixed; bottom: 30px; left: 50%; transform: translateX(-50%);
+  color: rgba(255,255,255,0.15); font: 14px Georgia, serif;
+  letter-spacing: 2px; pointer-events: none;
+}
+</style>
+</head>
+<body>
+<canvas id="c" width="1280" height="720"></canvas>
+<div id="cursor"></div>
+<div id="hint">stay still... let it come to you</div>
+<script>
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d');
+const cursorEl = document.getElementById('cursor');
+const hintEl = document.getElementById('hint');
+const W = 1280, H = 720;
+
+const WORDS = [
+  'ephemeral', 'petrichor', 'sonder', 'vellichor', 'serendipity',
+  'mellifluous', 'luminous', 'ethereal', 'gossamer', 'phosphene',
+  'susurrus', 'halcyon', 'diaphanous', 'effervescent', 'incandescent',
+  'cerulean', 'iridescent', 'reverie', 'elysian', 'sonorous',
+  'limerence', 'aurora', 'nebula', 'chrysalis', 'solstice'
+];
+
+let mouse = { x: W / 2, y: H / 2, vx: 0, vy: 0, speed: 0, stillTime: 0 };
+
+document.addEventListener('mousemove', (e) => {
+  mouse.vx = e.clientX - mouse.x;
+  mouse.vy = e.clientY - mouse.y;
+  mouse.x = e.clientX;
+  mouse.y = e.clientY;
+  cursorEl.style.left = e.clientX + 'px';
+  cursorEl.style.top = e.clientY + 'px';
+});
+
+class LetterParticle {
+  constructor(char, wordIndex, charIndex, totalChars) {
+    this.char = char;
+    this.wordIndex = wordIndex;
+    this.charIndex = charIndex;
+    this.totalChars = totalChars;
+    this.x = Math.random() * W;
+    this.y = Math.random() * H;
+    this.vx = (Math.random() - 0.5) * 0.5;
+    this.vy = (Math.random() - 0.5) * 0.5;
+    this.targetX = 0;
+    this.targetY = 0;
+    this.opacity = 0;
+    this.maxOpacity = 0.15 + Math.random() * 0.2;
+    this.coherence = 0;
+    this.fontSize = 28 + Math.random() * 8;
+    this.phase = Math.random() * Math.PI * 2;
+    this.breathRate = 0.5 + Math.random() * 1.5;
+    const hue = 25 + Math.random() * 30;
+    const sat = 60 + Math.random() * 30;
+    const lit = 65 + Math.random() * 25;
+    this.color = `hsla(${hue}, ${sat}%, ${lit}%,`;
+  }
+
+  update(time, wordState) {
+    const spacing = 24;
+    const wordWidth = this.totalChars * spacing;
+    this.targetX = wordState.x - wordWidth / 2 + this.charIndex * spacing;
+    this.targetY = wordState.y;
+
+    const dx = this.x - mouse.x;
+    const dy = this.y - mouse.y;
+    const dist = Math.sqrt(dx * dx + dy * dy);
+    const repelRadius = 180 + mouse.speed * 3;
+
+    if (dist < repelRadius && dist > 0) {
+      const force = (1 - dist / repelRadius) * (2.5 + mouse.speed * 0.15);
+      this.vx += (dx / dist) * force;
+      this.vy += (dy / dist) * force;
+      this.coherence *= 0.93;
+    }
+
+    const attractStrength = 0.003 + wordState.forming * 0.025;
+    this.vx += (this.targetX - this.x) * attractStrength;
+    this.vy += (this.targetY - this.y) * attractStrength;
+
+    this.vx += (Math.random() - 0.5) * 0.25;
+    this.vy += (Math.random() - 0.5) * 0.25;
+
+    this.vx *= 0.96;
+    this.vy *= 0.96;
+    this.x += this.vx;
+    this.y += this.vy;
+
+    if (this.x < -50) this.x = W + 50;
+    if (this.x > W + 50) this.x = -50;
+    if (this.y < -50) this.y = H + 50;
+    if (this.y > H + 50) this.y = -50;
+
+    const tDist = Math.sqrt((this.x - this.targetX) ** 2 + (this.y - this.targetY) ** 2);
+    this.coherence = Math.max(0, 1 - tDist / 250);
+
+    const targetOpacity = Math.max(this.maxOpacity, this.coherence * wordState.forming * 0.9);
+    this.opacity += (targetOpacity - this.opacity) * 0.05;
+    this.phase += this.breathRate * (1/60);
+  }
+
+  draw(ctx) {
+    if (this.opacity < 0.01) return;
+    const breath = Math.sin(this.phase) * 0.12;
+    const alpha = Math.min(1, this.opacity + breath);
+    const size = this.fontSize + Math.sin(this.phase * 0.7) * 2;
+
+    if (this.coherence > 0.5) {
+      ctx.save();
+      ctx.shadowColor = `hsla(35, 80%, 70%, ${this.coherence * 0.6})`;
+      ctx.shadowBlur = 25 * this.coherence;
+      ctx.font = `${size}px Georgia, serif`;
+      ctx.fillStyle = this.color + `${alpha * this.coherence * 0.4})`;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(this.char, this.x, this.y);
+      ctx.restore();
+    }
+
+    ctx.save();
+    ctx.font = `${size}px Georgia, serif`;
+    ctx.fillStyle = this.color + `${alpha})`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(this.char, this.x, this.y);
+    ctx.restore();
+  }
+}
+
+class WordGhost {
+  constructor(word, index, total) {
+    this.word = word;
+    this.letters = [];
+    this.forming = 0;
+    this.formingTarget = 0;
+    this.crystallized = false;
+    this.crystallizeTime = 0;
+    this.fadeOut = 0;
+
+    const angle = (index / total) * Math.PI * 2 + Math.random() * 0.3;
+    const radius = 140 + Math.random() * 220;
+    this.homeX = W / 2 + Math.cos(angle) * radius;
+    this.homeY = H / 2 + Math.sin(angle) * radius;
+    this.x = this.homeX;
+    this.y = this.homeY;
+    this.driftPhase = Math.random() * Math.PI * 2;
+    this.driftSpeed = 0.15 + Math.random() * 0.2;
+
+    for (let i = 0; i < word.length; i++) {
+      this.letters.push(new LetterParticle(word[i], index, i, word.length));
+    }
+  }
+
+  update(time) {
+    this.driftPhase += this.driftSpeed * (1/60);
+    this.x = this.homeX + Math.sin(this.driftPhase) * 25;
+    this.y = this.homeY + Math.cos(this.driftPhase * 0.7) * 18;
+
+    const dx = this.x - mouse.x;
+    const dy = this.y - mouse.y;
+    const dist = Math.sqrt(dx * dx + dy * dy);
+    const proximity = dist < 280 ? (1 - dist / 280) : 0;
+
+    if (mouse.speed < 2 && mouse.stillTime > 40) {
+      const stillBonus = Math.min(1, (mouse.stillTime - 40) / 200);
+      this.formingTarget = proximity * stillBonus;
+    } else {
+      this.formingTarget *= 0.85;
+    }
+
+    this.forming += (this.formingTarget - this.forming) * 0.025;
+
+    if (this.forming > 0.8 && !this.crystallized) {
+      const avgC = this.letters.reduce((s, l) => s + l.coherence, 0) / this.letters.length;
+      if (avgC > 0.65) {
+        this.crystallized = true;
+        this.crystallizeTime = time;
+      }
+    }
+
+    if (this.crystallized) {
+      const age = time - this.crystallizeTime;
+      if (age > 3.5) {
+        this.fadeOut += 0.004;
+        if (this.fadeOut > 1) this.respawn();
+      }
+    }
+
+    for (const letter of this.letters) letter.update(time, this);
+  }
+
+  respawn() {
+    this.crystallized = false;
+    this.fadeOut = 0;
+    this.forming = 0;
+    this.formingTarget = 0;
+    const angle = Math.random() * Math.PI * 2;
+    const radius = 140 + Math.random() * 220;
+    this.homeX = W / 2 + Math.cos(angle) * radius;
+    this.homeY = H / 2 + Math.sin(angle) * radius;
+    for (const l of this.letters) {
+      l.x = this.homeX + (Math.random() - 0.5) * 350;
+      l.y = this.homeY + (Math.random() - 0.5) * 350;
+      l.opacity = l.maxOpacity;
+      l.coherence = 0;
+    }
+  }
+
+  draw(ctx, time) {
+    if (this.crystallized) {
+      const age = time - this.crystallizeTime;
+      if (age < 2.5) {
+        const flash = Math.sin(age / 2.5 * Math.PI) * 0.6;
+        ctx.save();
+        ctx.globalAlpha = flash * (1 - this.fadeOut);
+        ctx.shadowColor = 'rgba(255, 200, 100, 0.9)';
+        ctx.shadowBlur = 50;
+        ctx.font = '34px Georgia, serif';
+        ctx.fillStyle = `rgba(255, 220, 150, ${flash})`;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(this.word, this.x, this.y);
+        ctx.restore();
+      }
+    }
+
+    const fade = this.crystallized ? Math.max(0, 1 - this.fadeOut) : 1;
+    ctx.save();
+    ctx.globalAlpha = fade;
+    for (const letter of this.letters) letter.draw(ctx);
+    ctx.restore();
+
+    // Ghost of the forming word
+    if (this.forming > 0.15 && !this.crystallized) {
+      ctx.save();
+      const ghostAlpha = this.forming * 0.08;
+      ctx.globalAlpha = ghostAlpha;
+      ctx.font = '28px Georgia, serif';
+      ctx.fillStyle = `rgba(255, 200, 130, ${ghostAlpha})`;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      const visibleChars = Math.floor(this.word.length * this.forming);
+      let ghostText = '';
+      for (let i = 0; i < this.word.length; i++) {
+        ghostText += i < visibleChars ? this.word[i] : '\u2009';
+      }
+      ctx.fillText(ghostText, this.x, this.y);
+      ctx.restore();
+    }
+  }
+}
+
+class MemoryMote {
+  constructor() { this.reset(); }
+  reset() {
+    this.x = Math.random() * W;
+    this.y = Math.random() * H;
+    this.vx = (Math.random() - 0.5) * 0.15;
+    this.vy = (Math.random() - 0.5) * 0.15 - 0.08;
+    this.size = 0.8 + Math.random() * 1.8;
+    this.opacity = 0.05 + Math.random() * 0.18;
+    this.phase = Math.random() * Math.PI * 2;
+    const hue = 200 + Math.random() * 60;
+    this.color = `hsla(${hue}, 40%, 70%,`;
+  }
+  update() {
+    this.x += this.vx + Math.sin(this.phase) * 0.03;
+    this.y += this.vy;
+    this.phase += 0.015;
+    if (this.y < -10 || this.x < -10 || this.x > W + 10) this.reset();
+    if (mouse.stillTime > 80) {
+      const dx = mouse.x - this.x, dy = mouse.y - this.y;
+      const dist = Math.sqrt(dx * dx + dy * dy);
+      if (dist < 180 && dist > 0) {
+        this.vx += dx / dist * 0.008;
+        this.vy += dy / dist * 0.008;
+      }
+    }
+  }
+  draw(ctx) {
+    ctx.beginPath();
+    ctx.arc(this.x, this.y, this.size, 0, Math.PI * 2);
+    ctx.fillStyle = this.color + `${this.opacity})`;
+    ctx.fill();
+  }
+}
+
+// Frustration tendrils
+class FrustrationTendril {
+  constructor(x, y) {
+    this.points = [{ x, y }];
+    this.life = 1;
+    this.hue = 280 + Math.random() * 40;
+    const angle = Math.random() * Math.PI * 2;
+    this.vx = Math.cos(angle) * 2;
+    this.vy = Math.sin(angle) * 2;
+  }
+  update() {
+    this.life -= 0.015;
+    const last = this.points[this.points.length - 1];
+    this.vx += (Math.random() - 0.5) * 0.8;
+    this.vy += (Math.random() - 0.5) * 0.8;
+    this.vx *= 0.95; this.vy *= 0.95;
+    this.points.push({ x: last.x + this.vx, y: last.y + this.vy });
+    if (this.points.length > 30) this.points.shift();
+    return this.life > 0;
+  }
+  draw(ctx) {
+    if (this.points.length < 2) return;
+    ctx.beginPath();
+    ctx.moveTo(this.points[0].x, this.points[0].y);
+    for (let i = 1; i < this.points.length; i++) ctx.lineTo(this.points[i].x, this.points[i].y);
+    ctx.strokeStyle = `hsla(${this.hue}, 50%, 60%, ${this.life * 0.25})`;
+    ctx.lineWidth = 1;
+    ctx.stroke();
+  }
+}
+
+// Initialize
+const selectedWords = [];
+const wordSet = new Set();
+while (selectedWords.length < 8) {
+  const w = WORDS[Math.floor(Math.random() * WORDS.length)];
+  if (!wordSet.has(w)) { wordSet.add(w); selectedWords.push(w); }
+}
+
+const wordGhosts = selectedWords.map((w, i) => new WordGhost(w, i, selectedWords.length));
+const motes = Array.from({ length: 100 }, () => new MemoryMote());
+const tendrils = [];
+let prevFormings = wordGhosts.map(() => 0);
+
+ctx.fillStyle = '#0a0a1a';
+ctx.fillRect(0, 0, W, H);
+
+let lastTime = 0, time = 0;
+
+function animate(ts) {
+  const dt = Math.min(0.05, (ts - lastTime) / 1000);
+  lastTime = ts;
+  time += dt;
+
+  mouse.speed = Math.sqrt(mouse.vx * mouse.vx + mouse.vy * mouse.vy);
+  if (mouse.speed < 1.5) { mouse.stillTime++; } else { mouse.stillTime = 0; }
+  mouse.vx *= 0.9; mouse.vy *= 0.9;
+
+  ctx.fillStyle = 'rgba(10, 10, 26, 0.06)';
+  ctx.fillRect(0, 0, W, H);
+
+  for (const m of motes) { m.update(); m.draw(ctx); }
+
+  for (let i = tendrils.length - 1; i >= 0; i--) {
+    if (!tendrils[i].update()) { tendrils.splice(i, 1); continue; }
+    tendrils[i].draw(ctx);
+  }
+
+  for (let i = 0; i < wordGhosts.length; i++) {
+    const wg = wordGhosts[i];
+    wg.update(time);
+    if (prevFormings[i] > 0.4 && wg.forming < prevFormings[i] - 0.05) {
+      if (Math.random() < 0.3) tendrils.push(new FrustrationTendril(wg.x, wg.y));
+    }
+    prevFormings[i] = wg.forming;
+    wg.draw(ctx, time);
+  }
+
+  // Warm glow near forming words
+  const nearest = wordGhosts.reduce((best, wg) => {
+    const d = Math.sqrt((wg.x - mouse.x) ** 2 + (wg.y - mouse.y) ** 2);
+    return d < best.d ? { d, wg } : best;
+  }, { d: Infinity, wg: null });
+
+  if (nearest.wg && nearest.wg.forming > 0.25) {
+    const f = nearest.wg.forming;
+    ctx.save();
+    ctx.globalAlpha = f * 0.12;
+    const gradient = ctx.createRadialGradient(nearest.wg.x, nearest.wg.y, 0, nearest.wg.x, nearest.wg.y, 160);
+    gradient.addColorStop(0, 'rgba(255, 180, 80, 0.25)');
+    gradient.addColorStop(1, 'rgba(255, 180, 80, 0)');
+    ctx.fillStyle = gradient;
+    ctx.beginPath();
+    ctx.arc(nearest.wg.x, nearest.wg.y, 160, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+  }
+
+  if (time > 8) hintEl.style.opacity = String(Math.max(0, 1 - (time - 8) / 4));
+
+  const s = Math.min(50, 24 + mouse.stillTime * 0.15);
+  cursorEl.style.width = s + 'px';
+  cursorEl.style.height = s + 'px';
+  const cursorAlpha = Math.max(0.15, 0.6 - mouse.stillTime * 0.003);
+  cursorEl.style.borderColor = `rgba(255,180,100,${cursorAlpha})`;
+
+  requestAnimationFrame(animate);
+}
+
+requestAnimationFrame(animate);
+</script>
+</body>
+</html>

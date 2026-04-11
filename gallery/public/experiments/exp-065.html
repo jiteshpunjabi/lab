@@ -1,0 +1,460 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=1280,height=720">
+<title>exp-065: Stratigraphic Scripture</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{width:1280px;height:720px;overflow:hidden;background:#000}
+canvas{display:block}
+</style>
+</head>
+<body>
+<canvas id="c" width="1280" height="720"></canvas>
+<script>
+// STRATIGRAPHIC SCRIPTURE
+// Offspring of exp-052 (Tectonic Scripture) x exp-044 (Strata)
+//
+// Hypothesis: What if text were a geological stratum — readable only where
+// erosion has exposed it, glowing along fault lines, with deeper layers
+// holding older forgotten words?
+//
+// Genes from exp-052: voronoi plates, fault-line detection, text-as-geology,
+//   deep/ghost text reveal, earthquake click interaction, magma particles
+// Genes from exp-044: WebGL raymarching heightfield, simplex noise FBM,
+//   sedimentary strata coloring, domain warping, atmospheric fog
+//
+// Combination: A raymarched terrain where text is embedded as strata layers.
+// Fault lines glow with magma and reveal buried text. Click triggers quakes
+// that erode terrain to expose deeper textual strata.
+
+const C = document.getElementById('c');
+const gl = C.getContext('webgl', { preserveDrawingBuffer: true });
+const W = 1280, H = 720;
+gl.viewport(0, 0, W, H);
+
+function compile(type, src) {
+  const s = gl.createShader(type);
+  gl.shaderSource(s, src);
+  gl.compileShader(s);
+  if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) {
+    console.error(gl.getShaderInfoLog(s));
+    return null;
+  }
+  return s;
+}
+
+function makeProgram(vs, fs) {
+  const p = gl.createProgram();
+  gl.attachShader(p, compile(gl.VERTEX_SHADER, vs));
+  gl.attachShader(p, compile(gl.FRAGMENT_SHADER, fs));
+  gl.linkProgram(p);
+  if (!gl.getProgramParameter(p, gl.LINK_STATUS)) {
+    console.error(gl.getProgramInfoLog(p));
+    return null;
+  }
+  return p;
+}
+
+// Create text texture with layered strata of text
+const textCanvas = document.createElement('canvas');
+textCanvas.width = 1024;
+textCanvas.height = 1024;
+const tctx = textCanvas.getContext('2d');
+
+// Text layers — surface to deep, like geological strata
+const STRATA_TEXT = [
+  // Surface layer (most recent)
+  { texts: [
+    "the continents of meaning drift apart",
+    "no single reader notices the widening gulf",
+    "every sentence is a tectonic plate",
+    "seemingly permanent riding on molten thought"
+  ], font: '18px Georgia,serif', color: '#e8d8c0' },
+  // Middle layer
+  { texts: [
+    "BEFORE LANGUAGE THERE WAS PRESSURE",
+    "THE FAULT LINES RUN THROUGH SPACES",
+    "AMBIGUITY POOLS LIKE MAGMA",
+    "WHAT RISES IS OLDER TEXT"
+  ], font: 'bold 16px monospace', color: '#c08850' },
+  // Deep layer (ancient)
+  { texts: [
+    "GRAMMAR IS COOLED MAGMA",
+    "ETYMOLOGY IS STRATIGRAPHY",
+    "EVERY METAPHOR IS A FOSSIL",
+    "THE CORE IS STILL MOLTEN"
+  ], font: 'bold 22px monospace', color: '#ff6020' },
+  // Deepest layer
+  { texts: [
+    "SILENCE CONDUCTS HEAT UPWARD",
+    "THE UNSAYABLE IS TECTONIC",
+    "WHAT BURNS CANNOT BE UNREAD",
+    "THE FIRST WORD WAS AN ERUPTION"
+  ], font: 'bold 28px monospace', color: '#ff3010' },
+];
+
+// Render text into bands on texture (each layer occupies a vertical quarter)
+tctx.fillStyle = '#000';
+tctx.fillRect(0, 0, 1024, 1024);
+for (let layer = 0; layer < STRATA_TEXT.length; layer++) {
+  const s = STRATA_TEXT[layer];
+  tctx.font = s.font;
+  tctx.fillStyle = s.color;
+  const yBase = layer * 256 + 40;
+  for (let i = 0; i < s.texts.length; i++) {
+    tctx.fillText(s.texts[i], 30 + (layer * 17) % 60, yBase + i * 55);
+  }
+}
+
+// Upload text texture to WebGL
+const textTex = gl.createTexture();
+gl.bindTexture(gl.TEXTURE_2D, textTex);
+gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, textCanvas);
+gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.REPEAT);
+gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+
+const quadVS = `
+attribute vec2 a_pos;
+varying vec2 v_uv;
+void main() {
+  v_uv = a_pos * 0.5 + 0.5;
+  gl_Position = vec4(a_pos, 0.0, 1.0);
+}`;
+
+const mainFS = `
+precision highp float;
+varying vec2 v_uv;
+uniform float u_time;
+uniform vec2 u_resolution;
+uniform vec2 u_quake;   // quake epicenter in UV space
+uniform float u_qforce; // quake force 0-1
+uniform sampler2D u_text;
+
+// Simplex noise (from exp-044)
+vec3 mod289(vec3 x) { return x - floor(x * (1.0/289.0)) * 289.0; }
+vec4 mod289(vec4 x) { return x - floor(x * (1.0/289.0)) * 289.0; }
+vec4 permute(vec4 x) { return mod289(((x*34.0)+1.0)*x); }
+vec4 taylorInvSqrt(vec4 r) { return 1.79284291400159 - 0.85373472095314 * r; }
+
+float snoise(vec3 v) {
+  const vec2 C_ = vec2(1.0/6.0, 1.0/3.0);
+  const vec4 D = vec4(0.0, 0.5, 1.0, 2.0);
+  vec3 i = floor(v + dot(v, C_.yyy));
+  vec3 x0 = v - i + dot(i, C_.xxx);
+  vec3 g = step(x0.yzx, x0.xyz);
+  vec3 l = 1.0 - g;
+  vec3 i1 = min(g.xyz, l.zxy);
+  vec3 i2 = max(g.xyz, l.zxy);
+  vec3 x1 = x0 - i1 + C_.xxx;
+  vec3 x2 = x0 - i2 + C_.yyy;
+  vec3 x3 = x0 - D.yyy;
+  i = mod289(i);
+  vec4 p = permute(permute(permute(
+    i.z + vec4(0.0, i1.z, i2.z, 1.0))
+    + i.y + vec4(0.0, i1.y, i2.y, 1.0))
+    + i.x + vec4(0.0, i1.x, i2.x, 1.0));
+  float n_ = 0.142857142857;
+  vec3 ns = n_ * D.wyz - D.xzx;
+  vec4 j = p - 49.0 * floor(p * ns.z * ns.z);
+  vec4 x_ = floor(j * ns.z);
+  vec4 y_ = floor(j - 7.0 * x_);
+  vec4 x = x_ * ns.x + ns.yyyy;
+  vec4 y = y_ * ns.x + ns.yyyy;
+  vec4 h = 1.0 - abs(x) - abs(y);
+  vec4 b0 = vec4(x.xy, y.xy);
+  vec4 b1 = vec4(x.zw, y.zw);
+  vec4 s0 = floor(b0)*2.0 + 1.0;
+  vec4 s1 = floor(b1)*2.0 + 1.0;
+  vec4 sh = -step(h, vec4(0.0));
+  vec4 a0 = b0.xzyw + s0.xzyw*sh.xxyy;
+  vec4 a1 = b1.xzyw + s1.xzyw*sh.zzww;
+  vec3 p0 = vec3(a0.xy, h.x);
+  vec3 p1 = vec3(a0.zw, h.y);
+  vec3 p2 = vec3(a1.xy, h.z);
+  vec3 p3 = vec3(a1.zw, h.w);
+  vec4 norm = taylorInvSqrt(vec4(dot(p0,p0), dot(p1,p1), dot(p2,p2), dot(p3,p3)));
+  p0 *= norm.x; p1 *= norm.y; p2 *= norm.z; p3 *= norm.w;
+  vec4 m = max(0.6 - vec4(dot(x0,x0), dot(x1,x1), dot(x2,x2), dot(x3,x3)), 0.0);
+  m = m * m;
+  return 42.0 * dot(m*m, vec4(dot(p0,x0), dot(p1,x1), dot(p2,x2), dot(p3,x3)));
+}
+
+float fbm(vec3 p, int octaves) {
+  float val = 0.0, amp = 0.5, freq = 1.0;
+  for (int i = 0; i < 7; i++) {
+    if (i >= octaves) break;
+    val += amp * snoise(p * freq);
+    freq *= 2.03; amp *= 0.49;
+    p.xy += vec2(0.3, -0.7);
+  }
+  return val;
+}
+
+// Voronoi for tectonic plates (from exp-052)
+vec2 hash2(vec2 p) {
+  p = vec2(dot(p,vec2(127.1,311.7)), dot(p,vec2(269.5,183.3)));
+  return fract(sin(p)*43758.5453123);
+}
+
+// Returns (distance to nearest, distance to second nearest)
+vec3 voronoi(vec2 p) {
+  vec2 n = floor(p);
+  vec2 f = fract(p);
+  float md = 8.0, md2 = 8.0;
+  vec2 mg;
+  for (int j=-1; j<=1; j++) for (int i=-1; i<=1; i++) {
+    vec2 g = vec2(float(i), float(j));
+    vec2 o = hash2(n+g);
+    vec2 r = g + o - f;
+    float d = dot(r,r);
+    if (d < md) { md2 = md; md = d; mg = r; }
+    else if (d < md2) md2 = d;
+  }
+  return vec3(sqrt(md), sqrt(md2), sqrt(md2)-sqrt(md));
+}
+
+float terrain(vec2 p, float t) {
+  float drift = t * 0.015;
+  vec3 q = vec3(p, drift);
+  float continental = fbm(q * 0.35, 4) * 1.6;
+  vec2 warp = vec2(snoise(vec3(p*0.5, drift*0.7)), snoise(vec3(p*0.5+5.2, drift*0.7)));
+  float ridges = fbm(vec3((p+warp*0.8)*0.7, drift*0.5), 5);
+  ridges = abs(ridges);
+  ridges = pow(ridges, 1.5) * 1.8;
+  float erosion = fbm(vec3(p*2.0+warp*0.3, drift*1.5), 6) * 0.12;
+  float raw = continental + ridges - erosion;
+
+  // Quake erosion: carve terrain near epicenter
+  float qdist = length(p - (u_quake * 4.0 - 2.0));
+  raw -= u_qforce * 0.6 * exp(-qdist * qdist * 0.5);
+
+  return raw;
+}
+
+vec3 calcNormal(vec2 p, float t) {
+  float eps = 0.003;
+  float h = terrain(p, t);
+  return normalize(vec3(
+    terrain(p-vec2(eps,0.0),t) - terrain(p+vec2(eps,0.0),t),
+    2.0*eps,
+    terrain(p-vec2(0.0,eps),t) - terrain(p+vec2(0.0,eps),t)
+  ));
+}
+
+// Strata coloring with embedded text
+vec3 strataColor(float h, float slope, vec2 worldPos, float t) {
+  // Geological strata palette
+  vec3 ocean = vec3(0.04, 0.05, 0.10);
+  vec3 sediment = vec3(0.55, 0.42, 0.28);
+  vec3 clay = vec3(0.45, 0.30, 0.18);
+  vec3 slate = vec3(0.35, 0.30, 0.26);
+  vec3 basalt = vec3(0.18, 0.14, 0.12);
+  vec3 magmaCol = vec3(0.9, 0.25, 0.05);
+
+  float seaLevel = -0.12;
+  vec3 col = ocean;
+  col = mix(col, sediment, smoothstep(seaLevel, seaLevel+0.15, h));
+  col = mix(col, clay, smoothstep(seaLevel+0.1, seaLevel+0.4, h));
+  col = mix(col, slate, smoothstep(0.3, 0.7, h));
+  col = mix(col, basalt, smoothstep(0.6, 1.0, h));
+
+  // Strata banding
+  float band = sin(h * 35.0 + snoise(vec3(h*8.0, 0.0, t*0.03))*4.0)*0.5+0.5;
+  col = mix(col, col*0.8, band*0.2*smoothstep(0.4,0.7,slope));
+
+  // Text strata: sample text texture based on height layer
+  // Map height to text layer (0=surface, 1=deep)
+  float textLayer = clamp((h + 0.2) / 1.5, 0.0, 0.999);
+  vec2 textUV = vec2(
+    fract(worldPos.x * 0.6 + t * 0.005),
+    textLayer
+  );
+  vec4 textSample = texture2D(u_text, textUV);
+  float textBrightness = max(textSample.r, max(textSample.g, textSample.b));
+
+  // Text is visible on steep slopes (erosion exposure) and fault zones
+  // Voronoi fault detection
+  vec3 vor = voronoi(worldPos * 1.2 + t * 0.01);
+  float faultProx = 1.0 - smoothstep(0.0, 0.12, vor.z); // near plate boundaries
+
+  float exposure = slope * 0.8 + faultProx * 0.6 + u_qforce * 0.4;
+  exposure = clamp(exposure, 0.0, 1.0);
+
+  // Deep text glows with magma color, surface text is pale
+  vec3 textColor = mix(
+    vec3(0.9, 0.85, 0.7),  // surface text: pale parchment
+    magmaCol * 1.5,          // deep text: magma glow
+    textLayer
+  );
+
+  col = mix(col, textColor, textBrightness * exposure * 0.7);
+
+  // Fault line magma glow
+  float magmaGlow = faultProx * (0.3 + u_qforce * 0.7);
+  col += magmaCol * magmaGlow * 0.4;
+
+  return col;
+}
+
+void main() {
+  vec2 uv = v_uv;
+  float aspect = u_resolution.x / u_resolution.y;
+  float t = u_time;
+
+  // Camera: slow orbit looking down at terrain with horizon visible
+  float camAngle = t * 0.018 + 0.5;
+  vec3 camPos = vec3(
+    sin(camAngle) * 1.8,
+    1.4 + sin(t * 0.04) * 0.15,
+    cos(camAngle) * 1.8
+  );
+  vec3 camTarget = vec3(
+    sin(camAngle + 0.25) * 3.5,
+    0.3,
+    cos(camAngle + 0.25) * 3.5
+  );
+
+  vec3 forward = normalize(camTarget - camPos);
+  vec3 right = normalize(cross(forward, vec3(0.0,1.0,0.0)));
+  vec3 up = cross(right, forward);
+
+  vec2 screen = (uv - 0.5) * vec2(aspect, 1.0);
+  vec3 rd = normalize(forward*2.0 + right*screen.x + up*screen.y);
+
+  vec3 col = vec3(0.0);
+  float tRay = 0.0;
+  bool hit = false;
+  vec3 hitPos;
+
+  for (int i = 0; i < 150; i++) {
+    hitPos = camPos + rd * tRay;
+    float h = terrain(hitPos.xz, t);
+    float diff = hitPos.y - h;
+    if (diff < 0.003) { hit = true; break; }
+    tRay += max(diff * 0.45, 0.006);
+    if (tRay > 10.0) break;
+  }
+
+  if (hit) {
+    vec3 normal = calcNormal(hitPos.xz, t);
+    float h = terrain(hitPos.xz, t);
+    float slope = 1.0 - normal.y;
+
+    // Lighting
+    float dayPhase = t * 0.08 + 1.2;
+    vec3 sunDir = normalize(vec3(cos(dayPhase)*0.7, 0.5+sin(dayPhase)*0.3, sin(dayPhase)*0.7));
+    float sunHeight = sunDir.y;
+    vec3 sunCol = mix(vec3(1.3,0.45,0.15), vec3(1.05,1.0,0.95), smoothstep(0.0,0.6,sunHeight));
+
+    float diff = max(dot(normal, sunDir), 0.0);
+    vec3 skyCol = mix(vec3(0.12,0.08,0.15), vec3(0.35,0.42,0.65), smoothstep(-0.1,0.4,sunHeight));
+    float amb = 0.18 + 0.12 * normal.y;
+
+    vec3 matCol = strataColor(h, slope, hitPos.xz, t);
+    col = matCol * (diff * sunCol + amb * skyCol);
+
+    // Atmospheric fog
+    float dist = length(hitPos - camPos);
+    vec3 fogCol = mix(skyCol, sunCol*0.25, smoothstep(0.0,0.5,sunHeight));
+    float fog = 1.0 - exp(-dist * 0.18);
+    col = mix(col, fogCol, fog);
+
+    // Valley mist
+    float valleyFog = exp(-max(h,0.0)*4.0) * 0.25;
+    col = mix(col, fogCol*0.7, valleyFog*(1.0-fog));
+  } else {
+    // Sky
+    float dayPhase = t * 0.08 + 1.2;
+    vec3 sunDir = normalize(vec3(cos(dayPhase)*0.7, 0.5+sin(dayPhase)*0.3, sin(dayPhase)*0.7));
+    float sunHeight = sunDir.y;
+    vec3 skyTop = mix(vec3(0.06,0.04,0.12), vec3(0.25,0.38,0.68), smoothstep(-0.1,0.4,sunHeight));
+    vec3 skyHor = mix(vec3(0.2,0.12,0.08), vec3(0.55,0.58,0.65), smoothstep(-0.1,0.3,sunHeight));
+    col = mix(skyHor, skyTop, smoothstep(0.0,0.5,rd.y));
+    float sunDot = max(dot(rd, sunDir), 0.0);
+    col += pow(sunDot, 200.0) * vec3(1.0,0.85,0.6) * 1.8;
+    col += pow(sunDot, 6.0) * vec3(0.9,0.5,0.2) * 0.12;
+  }
+
+  // Tone mapping
+  col *= 1.5;
+  col = col / (col + 1.0);
+  col = pow(col, vec3(0.78));
+
+  // Vignette
+  float vig = 1.0 - 0.25 * dot(uv-0.5, uv-0.5) * 2.0;
+  col *= vig;
+
+  gl_FragColor = vec4(col, 1.0);
+}`;
+
+const prog = makeProgram(quadVS, mainFS);
+gl.useProgram(prog);
+
+const buf = gl.createBuffer();
+gl.bindBuffer(gl.ARRAY_BUFFER, buf);
+gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1,-1,1,-1,-1,1,1,1]), gl.STATIC_DRAW);
+
+const aPos = gl.getAttribLocation(prog, 'a_pos');
+gl.enableVertexAttribArray(aPos);
+gl.vertexAttribPointer(aPos, 2, gl.FLOAT, false, 0, 0);
+
+const uTime = gl.getUniformLocation(prog, 'u_time');
+const uRes = gl.getUniformLocation(prog, 'u_resolution');
+const uQuake = gl.getUniformLocation(prog, 'u_quake');
+const uQForce = gl.getUniformLocation(prog, 'u_qforce');
+const uText = gl.getUniformLocation(prog, 'u_text');
+
+gl.uniform2f(uRes, W, H);
+gl.activeTexture(gl.TEXTURE0);
+gl.bindTexture(gl.TEXTURE_2D, textTex);
+gl.uniform1i(uText, 0);
+
+let quakeX = 0.5, quakeY = 0.5, qForce = 0, mouseDown = false;
+
+C.addEventListener('mousedown', e => {
+  mouseDown = true;
+  quakeX = e.offsetX / W;
+  quakeY = 1.0 - e.offsetY / H;
+});
+C.addEventListener('mouseup', () => { mouseDown = false; });
+C.addEventListener('mousemove', e => {
+  if (mouseDown) {
+    quakeX = e.offsetX / W;
+    quakeY = 1.0 - e.offsetY / H;
+  }
+});
+
+// Auto-interaction for screenshots
+let autoPhase = 0, frame = 0;
+function autoQuake() {
+  frame++;
+  if (autoPhase === 0 && frame === 40) { quakeX = 0.4; quakeY = 0.5; mouseDown = true; autoPhase = 1; }
+  if (autoPhase === 1 && frame === 65) { mouseDown = false; autoPhase = 2; }
+  if (autoPhase === 2 && frame === 85) { quakeX = 0.65; quakeY = 0.45; mouseDown = true; autoPhase = 3; }
+  if (autoPhase === 3 && frame === 105) { mouseDown = false; autoPhase = 4; }
+}
+
+const start = performance.now();
+
+function render() {
+  autoQuake();
+  const t = (performance.now() - start) / 1000.0;
+
+  if (mouseDown) qForce = Math.min(qForce + 0.02, 1.0);
+  else qForce *= 0.97;
+
+  gl.uniform1f(uTime, t);
+  gl.uniform2f(uQuake, quakeX, quakeY);
+  gl.uniform1f(uQForce, qForce);
+  gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+  requestAnimationFrame(render);
+}
+
+render();
+</script>
+</body>
+</html>

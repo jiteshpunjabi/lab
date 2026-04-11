@@ -1,0 +1,560 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=1280,height=720">
+<title>exp-079 — Vessel of Accumulated Gold</title>
+<style>
+  *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    width: 1280px;
+    height: 720px;
+    overflow: hidden;
+    background: #1a1410;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-family: 'Georgia', serif;
+    cursor: crosshair;
+  }
+
+  .scene {
+    position: relative;
+    width: 1280px;
+    height: 720px;
+  }
+
+  .vessel-container {
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    transform: translate(-50%, -50%);
+    width: 360px;
+    height: 460px;
+  }
+
+  .ambient-glow {
+    position: absolute;
+    width: 500px;
+    height: 500px;
+    left: 50%;
+    top: 50%;
+    transform: translate(-50%, -50%);
+    border-radius: 50%;
+    background: radial-gradient(circle, rgba(255,215,0,0.04) 0%, transparent 70%);
+    pointer-events: none;
+    z-index: 0;
+    transition: all 2s ease;
+  }
+
+  .vessel-body {
+    position: absolute;
+    width: 240px;
+    height: 320px;
+    left: 50%;
+    top: 52%;
+    transform: translate(-50%, -50%);
+    background: linear-gradient(135deg, #9B7F6C 0%, #8B6F5C 40%, #7A5F4C 100%);
+    border-radius: 48% 48% 42% 42% / 35% 35% 55% 55%;
+    box-shadow:
+      inset -25px -15px 50px rgba(0,0,0,0.45),
+      inset 15px 8px 35px rgba(210,185,160,0.25),
+      0 15px 50px rgba(0,0,0,0.6);
+    overflow: hidden;
+    transition: filter 0.15s ease;
+  }
+
+  .vessel-body::before {
+    content: '';
+    position: absolute;
+    top: 8%;
+    left: 12%;
+    width: 35%;
+    height: 45%;
+    background: radial-gradient(ellipse, rgba(220,195,170,0.35), transparent);
+    border-radius: 50%;
+  }
+
+  .vessel-body::after {
+    content: '';
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    width: 100%;
+    height: 30%;
+    background: linear-gradient(to top, rgba(0,0,0,0.15), transparent);
+  }
+
+  .vessel-neck {
+    position: absolute;
+    width: 110px;
+    height: 70px;
+    left: 50%;
+    top: 18%;
+    transform: translate(-50%, 0);
+    background: linear-gradient(135deg, #9B7F6C 0%, #8B6F5C 60%, #7A5F4C 100%);
+    border-radius: 8px 8px 45% 45%;
+    box-shadow:
+      inset -12px -6px 25px rgba(0,0,0,0.35),
+      inset 6px 4px 18px rgba(210,185,160,0.2);
+  }
+
+  .vessel-rim {
+    position: absolute;
+    width: 130px;
+    height: 18px;
+    left: 50%;
+    top: 16%;
+    transform: translate(-50%, 0);
+    background: linear-gradient(to bottom, #A88F7C, #9B7F6C);
+    border-radius: 50%;
+    box-shadow:
+      inset 0 -4px 10px rgba(0,0,0,0.3),
+      0 -3px 8px rgba(0,0,0,0.15);
+  }
+
+  .vessel-base {
+    position: absolute;
+    width: 140px;
+    height: 25px;
+    left: 50%;
+    bottom: 14%;
+    transform: translate(-50%, 0);
+    background: linear-gradient(to top, #6A5040, #7A5F4C);
+    border-radius: 0 0 50% 50% / 0 0 100% 100%;
+    box-shadow: 0 8px 20px rgba(0,0,0,0.5);
+  }
+
+  .vessel-container.shaking .vessel-body {
+    animation: tremble-body 0.06s infinite alternate;
+  }
+  .vessel-container.shaking .vessel-neck {
+    animation: tremble-neck 0.06s infinite alternate;
+  }
+  .vessel-container.shaking .vessel-rim {
+    animation: tremble-rim 0.06s infinite alternate;
+  }
+  .vessel-container.shaking .vessel-base {
+    animation: tremble-base 0.06s infinite alternate;
+  }
+
+  @keyframes tremble-body {
+    0% { transform: translate(-50%, -50%) rotate(-0.6deg) translateX(-1.5px); }
+    100% { transform: translate(-50%, -50%) rotate(0.6deg) translateX(1.5px); }
+  }
+  @keyframes tremble-neck {
+    0% { transform: translate(-50%, 0) rotate(-0.5deg) translateX(-1px); }
+    100% { transform: translate(-50%, 0) rotate(0.5deg) translateX(1px); }
+  }
+  @keyframes tremble-rim {
+    0% { transform: translate(-50%, 0) rotate(-0.4deg); }
+    100% { transform: translate(-50%, 0) rotate(0.4deg); }
+  }
+  @keyframes tremble-base {
+    0% { transform: translate(-50%, 0) rotate(-0.3deg); }
+    100% { transform: translate(-50%, 0) rotate(0.3deg); }
+  }
+
+  .crack {
+    position: absolute;
+    background: rgba(30,20,10,0.6);
+    height: 2px;
+    z-index: 5;
+    pointer-events: none;
+    transform-origin: left center;
+  }
+
+  .crack.healing {
+    animation: heal-crack 1.8s forwards ease-in;
+  }
+
+  @keyframes heal-crack {
+    0% { background: rgba(30,20,10,0.6); box-shadow: none; height: 2px; }
+    40% { background: #B89030; box-shadow: 0 0 3px rgba(255,215,0,0.3); height: 2.5px; }
+    100% { background: #FFD700; box-shadow: 0 0 8px rgba(255,215,0,0.5), 0 0 20px rgba(255,215,0,0.2); height: 3px; }
+  }
+
+  .seam {
+    position: absolute;
+    background: linear-gradient(
+      90deg,
+      transparent 0%,
+      #C8A84E 10%,
+      #E8C84E 25%,
+      #FFD700 50%,
+      #E8C84E 75%,
+      #C8A84E 90%,
+      transparent 100%
+    );
+    height: 3px;
+    border-radius: 2px;
+    opacity: 0;
+    z-index: 5;
+    pointer-events: none;
+    box-shadow:
+      0 0 6px rgba(255,215,0,0.5),
+      0 0 14px rgba(255,215,0,0.25);
+    transition: opacity 1.2s ease-in;
+  }
+
+  .seam.visible {
+    opacity: 1;
+  }
+
+  .seam.ancient {
+    background: linear-gradient(
+      90deg,
+      transparent 0%,
+      #A8882E 10%,
+      #C8A83E 25%,
+      #DDB730 50%,
+      #C8A83E 75%,
+      #A8882E 90%,
+      transparent 100%
+    );
+    box-shadow:
+      0 0 4px rgba(221,183,48,0.35),
+      0 0 10px rgba(221,183,48,0.15);
+  }
+
+  .dust {
+    position: absolute;
+    width: 3px;
+    height: 3px;
+    background: #FFD700;
+    border-radius: 50%;
+    pointer-events: none;
+    z-index: 10;
+    box-shadow: 0 0 5px rgba(255,215,0,0.7);
+    animation: dust-rise 1.5s ease-out forwards;
+  }
+
+  @keyframes dust-rise {
+    0% { opacity: 0.9; transform: translateY(0) scale(1); }
+    100% { opacity: 0; transform: translateY(-70px) scale(0.2); }
+  }
+
+  @keyframes glow-pulse {
+    0%, 100% { transform: translate(-50%, -50%) scale(1); opacity: 1; }
+    50% { transform: translate(-50%, -50%) scale(1.08); opacity: 0.7; }
+  }
+
+  .ambient-glow.pulsing {
+    animation: glow-pulse 2.5s ease-in-out 2;
+  }
+
+  .title {
+    position: absolute;
+    top: 28px;
+    left: 50%;
+    transform: translateX(-50%);
+    color: #6A5A4A;
+    font-size: 16px;
+    letter-spacing: 5px;
+    text-transform: uppercase;
+    opacity: 0.5;
+  }
+
+  .session-info {
+    position: absolute;
+    bottom: 28px;
+    left: 50%;
+    transform: translateX(-50%);
+    color: #6A5A4A;
+    font-size: 13px;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    opacity: 0.5;
+    white-space: nowrap;
+  }
+
+  .session-info .gold {
+    color: #C8A84E;
+    font-weight: bold;
+  }
+
+  .instruction {
+    position: absolute;
+    bottom: 56px;
+    left: 50%;
+    transform: translateX(-50%);
+    color: #5A4A3A;
+    font-size: 12px;
+    font-style: italic;
+    opacity: 0;
+    transition: opacity 2s ease;
+    white-space: nowrap;
+  }
+
+  .instruction.show {
+    opacity: 0.45;
+  }
+
+  .scar-map {
+    position: absolute;
+    right: 40px;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 80px;
+    height: 100px;
+    border: 1px solid rgba(200,168,78,0.15);
+    border-radius: 24% 24% 20% 20% / 18% 18% 28% 28%;
+    opacity: 0.4;
+    overflow: hidden;
+  }
+
+  .scar-map .map-seam {
+    position: absolute;
+    height: 1px;
+    background: #C8A84E;
+    opacity: 0.6;
+    border-radius: 1px;
+  }
+
+  .scar-map-label {
+    position: absolute;
+    right: 40px;
+    top: calc(50% + 60px);
+    transform: translateY(-50%);
+    color: #6A5A4A;
+    font-size: 9px;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    opacity: 0.3;
+    text-align: center;
+    width: 80px;
+  }
+</style>
+</head>
+<body>
+<div class="scene">
+  <div class="title">Vessel of Accumulated Gold</div>
+
+  <div class="vessel-container" id="vc">
+    <div class="ambient-glow" id="glow"></div>
+    <div class="vessel-body" id="vb"></div>
+    <div class="vessel-neck" id="vn"></div>
+    <div class="vessel-rim"></div>
+    <div class="vessel-base"></div>
+  </div>
+
+  <div class="scar-map" id="scar-map"></div>
+  <div class="scar-map-label">scar map</div>
+
+  <div class="instruction" id="instr">touch the vessel to break it &mdash; leave it to watch it heal</div>
+  <div class="session-info">
+    session <span class="gold" id="sn">1</span> &middot; <span class="gold" id="sc">0</span> scars remembered
+  </div>
+</div>
+
+<script>
+(function(){
+  const SK = 'vessel079-scars', SSK = 'vessel079-sess';
+  let scars = [], sess = 1;
+  try {
+    const r = localStorage.getItem(SK);
+    if (r) scars = JSON.parse(r);
+    const s = localStorage.getItem(SSK);
+    if (s) sess = parseInt(s) + 1;
+    localStorage.setItem(SSK, String(sess));
+  } catch(e){}
+
+  const $sn = document.getElementById('sn');
+  const $sc = document.getElementById('sc');
+  const $vc = document.getElementById('vc');
+  const $vb = document.getElementById('vb');
+  const $glow = document.getElementById('glow');
+  const $instr = document.getElementById('instr');
+  const $map = document.getElementById('scar-map');
+
+  $sn.textContent = sess;
+  $sc.textContent = scars.length;
+
+  let active = false, healTimer = null, cracks = [];
+
+  function renderOldScars() {
+    scars.forEach(s => {
+      addSeam(s.x, s.y, s.w, s.a, s.s || 1, true);
+      addMapSeam(s.x, s.y, s.w, s.a);
+    });
+    updateGlow();
+  }
+
+  function addSeam(x, y, w, angle, fromSess, immediate) {
+    const el = document.createElement('div');
+    const age = sess - (fromSess || 1);
+    el.className = 'seam' + (age > 0 ? ' ancient' : '');
+    el.style.left = x + '%';
+    el.style.top = y + '%';
+    el.style.width = w + 'px';
+    el.style.transform = 'rotate(' + angle + 'deg)';
+    if (immediate) {
+      const opacity = Math.max(0.25, 1 - age * 0.04);
+      el.style.opacity = opacity;
+    }
+    $vb.appendChild(el);
+    if (!immediate) requestAnimationFrame(() => el.classList.add('visible'));
+  }
+
+  function addMapSeam(x, y, w, angle) {
+    const el = document.createElement('div');
+    el.className = 'map-seam';
+    el.style.left = (x * 0.8) + '%';
+    el.style.top = (y * 0.8) + '%';
+    el.style.width = (w * 0.3) + 'px';
+    el.style.transform = 'rotate(' + angle + 'deg)';
+    $map.appendChild(el);
+  }
+
+  function updateGlow() {
+    const n = scars.length;
+    const intensity = Math.min(n * 0.025, 0.35);
+    const size = 500 + n * 10;
+    $glow.style.width = size + 'px';
+    $glow.style.height = size + 'px';
+    $glow.style.background = 'radial-gradient(circle, rgba(255,215,0,' + intensity + ') 0%, transparent 70%)';
+  }
+
+  function spawnDust(x, y, count) {
+    for (let i = 0; i < count; i++) {
+      const d = document.createElement('div');
+      d.className = 'dust';
+      d.style.left = (x + (Math.random()-0.5)*12) + '%';
+      d.style.top = (y + (Math.random()-0.5)*12) + '%';
+      d.style.animationDelay = (Math.random()*0.3) + 's';
+      d.style.animationDuration = (1 + Math.random()*0.8) + 's';
+      $vb.appendChild(d);
+      setTimeout(() => d.remove(), 2500);
+    }
+  }
+
+  function makeCrack(rx, ry) {
+    const el = document.createElement('div');
+    el.className = 'crack';
+    const angle = Math.random() * 360;
+    const len = 25 + Math.random() * 55;
+    el.style.left = rx + '%';
+    el.style.top = ry + '%';
+    el.style.width = len + 'px';
+    el.style.transform = 'rotate(' + angle + 'deg)';
+    $vb.appendChild(el);
+    if (Math.random() < 0.4) {
+      const sub = document.createElement('div');
+      sub.className = 'crack';
+      const sa = angle + (Math.random()-0.5)*90;
+      const sl = 10 + Math.random()*25;
+      sub.style.left = (rx + (Math.random()-0.5)*5) + '%';
+      sub.style.top = (ry + (Math.random()-0.5)*5) + '%';
+      sub.style.width = sl + 'px';
+      sub.style.transform = 'rotate(' + sa + 'deg)';
+      $vb.appendChild(sub);
+      cracks.push({ el: sub, x: rx, y: ry, w: sl, a: sa });
+    }
+    cracks.push({ el, x: rx, y: ry, w: len, a: angle });
+    spawnDust(rx, ry, 2);
+  }
+
+  function healAll() {
+    if (!cracks.length) return;
+    $glow.classList.add('pulsing');
+    const toHeal = cracks.slice();
+    cracks = [];
+    toHeal.forEach((c, i) => {
+      setTimeout(() => {
+        c.el.classList.add('healing');
+        spawnDust(c.x, c.y, 4);
+        setTimeout(() => {
+          c.el.remove();
+          addSeam(c.x, c.y, c.w, c.a, sess, false);
+          addMapSeam(c.x, c.y, c.w, c.a);
+          scars.push({ x: c.x, y: c.y, w: c.w, a: c.a, s: sess });
+          try { localStorage.setItem(SK, JSON.stringify(scars)); } catch(e){}
+          $sc.textContent = scars.length;
+          updateGlow();
+        }, 1800);
+      }, i * 150);
+    });
+    setTimeout(() => $glow.classList.remove('pulsing'), toHeal.length * 150 + 3000);
+  }
+
+  $vb.addEventListener('mousedown', () => {
+    active = true;
+    $vc.classList.add('shaking');
+    $instr.classList.remove('show');
+    if (healTimer) { clearTimeout(healTimer); healTimer = null; }
+  });
+
+  document.addEventListener('mouseup', () => {
+    if (!active) return;
+    active = false;
+    $vc.classList.remove('shaking');
+    healTimer = setTimeout(healAll, 1200);
+  });
+
+  $vb.addEventListener('mousemove', (e) => {
+    if (!active) return;
+    const r = $vb.getBoundingClientRect();
+    const rx = ((e.clientX - r.left) / r.width) * 100;
+    const ry = ((e.clientY - r.top) / r.height) * 100;
+    if (Math.random() < 0.35) makeCrack(rx, ry);
+  });
+
+  $vb.addEventListener('click', (e) => {
+    const r = $vb.getBoundingClientRect();
+    const rx = ((e.clientX - r.left) / r.width) * 100;
+    const ry = ((e.clientY - r.top) / r.height) * 100;
+    makeCrack(rx, ry);
+    if (!active) {
+      $vc.classList.add('shaking');
+      setTimeout(() => $vc.classList.remove('shaking'), 250);
+      healTimer = setTimeout(healAll, 1200);
+    }
+  });
+
+  setTimeout(() => $instr.classList.add('show'), 1500);
+  setTimeout(() => $instr.classList.remove('show'), 7000);
+
+  renderOldScars();
+
+  // Auto-demo: pre-place healed gold seams so vessel looks lived-in
+  if (scars.length === 0) {
+    const preSeams = [
+      { x: 18, y: 22, w: 55, a: -30 },
+      { x: 65, y: 18, w: 48, a: 35 },
+      { x: 35, y: 40, w: 70, a: -15 },
+      { x: 72, y: 45, w: 40, a: 55 },
+      { x: 25, y: 60, w: 50, a: -50 },
+      { x: 55, y: 65, w: 58, a: 25 },
+      { x: 45, y: 80, w: 42, a: -5 },
+      { x: 15, y: 78, w: 35, a: 65 },
+      { x: 78, y: 72, w: 38, a: -40 },
+      { x: 50, y: 30, w: 45, a: 10 },
+      { x: 30, y: 50, w: 32, a: -70 },
+      { x: 68, y: 35, w: 52, a: 48 },
+    ];
+    preSeams.forEach(s => {
+      addSeam(s.x, s.y, s.w, s.a, sess, false);
+      addMapSeam(s.x, s.y, s.w, s.a);
+      scars.push({ x: s.x, y: s.y, w: s.w, a: s.a, s: sess });
+    });
+    try { localStorage.setItem(SK, JSON.stringify(scars)); } catch(e){}
+    $sc.textContent = scars.length;
+    updateGlow();
+
+    setTimeout(() => {
+      const demoPoints = [[38, 40], [52, 55], [46, 32]];
+      demoPoints.forEach((p, i) => {
+        setTimeout(() => makeCrack(p[0], p[1]), i * 100);
+      });
+      $vc.classList.add('shaking');
+      setTimeout(() => {
+        $vc.classList.remove('shaking');
+        setTimeout(healAll, 600);
+      }, demoPoints.length * 100 + 150);
+    }, 2000);
+  }
+})();
+</script>
+</body>
+</html>

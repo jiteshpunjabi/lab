@@ -1,0 +1,454 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Sonoluminescent Flask</title>
+<style>
+  html, body {
+    margin: 0; padding: 0; width: 100%; height: 100%;
+    background: #05060c;
+    color: #cfd8ff;
+    font-family: 'Georgia', serif;
+    overflow: hidden;
+    user-select: none;
+  }
+  #stage { position: absolute; inset: 0; }
+  canvas { display: block; position: absolute; inset: 0; }
+  #label {
+    position: absolute;
+    left: 24px; top: 18px;
+    font-size: 13px;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    color: #8ca2ff;
+    opacity: 0.9;
+  }
+  #sub {
+    position: absolute;
+    left: 24px; top: 42px;
+    font-style: italic;
+    font-size: 15px;
+    color: #b8c4ff;
+    opacity: 0.75;
+    max-width: 420px;
+    line-height: 1.45;
+  }
+  #meter {
+    position: absolute;
+    right: 24px; top: 18px;
+    font-size: 11px;
+    letter-spacing: 0.12em;
+    text-align: right;
+    color: #8ca2ff;
+    opacity: 0.9;
+    line-height: 1.65;
+  }
+  #meter span { color: #eaf0ff; font-weight: bold; }
+  #hint {
+    position: absolute;
+    left: 0; right: 0; bottom: 14px;
+    text-align: center;
+    font-size: 11px;
+    color: #6a7bb8;
+    letter-spacing: 0.28em;
+    text-transform: uppercase;
+  }
+</style>
+</head>
+<body>
+<div id="stage">
+  <canvas id="c"></canvas>
+  <div id="label">Sonoluminescence &nbsp;&middot;&nbsp; Flask No. 7</div>
+  <div id="sub">A single bubble, trapped in a standing acoustic wave, collapsing 26,500 times per second and emitting a picosecond flash of blue-white light at each implosion.</div>
+  <div id="meter">
+    DRIVE &nbsp;<span id="drive">1.35</span> atm<br/>
+    RADIUS &nbsp;<span id="radius">4.5</span> &mu;m<br/>
+    FLASHES &nbsp;<span id="flashes">0</span>
+  </div>
+  <div id="hint">drag vertically to change acoustic drive</div>
+</div>
+
+<script>
+(() => {
+  const c = document.getElementById('c');
+  const ctx = c.getContext('2d');
+  const drive_el = document.getElementById('drive');
+  const rad_el = document.getElementById('radius');
+  const flash_el = document.getElementById('flashes');
+
+  let W = 1280, H = 720;
+  function resize() {
+    W = window.innerWidth || 1280;
+    H = window.innerHeight || 720;
+    c.width = W; c.height = H;
+  }
+  resize();
+  window.addEventListener('resize', resize);
+
+  const cx = () => W * 0.5;
+  const cy = () => H * 0.52;
+  const flaskR = () => Math.min(W, H) * 0.32;
+
+  let R = 4.5;
+  let Rdot = 0;
+  let t = 0;
+  const omega = 2 * Math.PI * 26500;
+  let drive = 1.35;
+  let targetDrive = 1.35;
+
+  const flashes = [];
+  const shocks = [];
+  let flashCount = 0;
+
+  const motes = [];
+  for (let i = 0; i < 90; i++) {
+    motes.push({
+      a: Math.random() * Math.PI * 2,
+      r: Math.random() * 0.88,
+      s: 0.2 + Math.random() * 0.6,
+      p: Math.random() * Math.PI * 2,
+    });
+  }
+
+  function drawBackground() {
+    const bg = ctx.createLinearGradient(0, 0, 0, H);
+    bg.addColorStop(0, '#07091a');
+    bg.addColorStop(0.6, '#040616');
+    bg.addColorStop(1, '#020308');
+    ctx.fillStyle = bg;
+    ctx.fillRect(0, 0, W, H);
+
+    ctx.fillStyle = 'rgba(90, 110, 180, 0.05)';
+    for (let i = 0; i < 60; i++) {
+      const x = (i * 193 + Math.floor(t * 30)) % W;
+      const y = (i * 127 + 40) % H;
+      ctx.fillRect(x, y, 1, 1);
+    }
+  }
+
+  function drawStandingWave(amp) {
+    const R0 = flaskR();
+    ctx.save();
+    ctx.translate(cx(), cy());
+    ctx.globalCompositeOperation = 'lighter';
+    for (let ring = 1; ring <= 7; ring++) {
+      const rr = R0 * (ring / 8);
+      ctx.beginPath();
+      const segs = 120;
+      for (let i = 0; i <= segs; i++) {
+        const a = i / segs * Math.PI * 2;
+        const wob = Math.sin(a * 6 + t * 12 + ring) * 2 * amp;
+        const x = Math.cos(a) * (rr + wob);
+        const y = Math.sin(a) * (rr + wob);
+        if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+      }
+      const alpha = 0.06 + amp * 0.14 * (1 - ring / 8);
+      ctx.strokeStyle = 'rgba(120, 160, 255, ' + alpha + ')';
+      ctx.lineWidth = 1;
+      ctx.stroke();
+    }
+    ctx.restore();
+  }
+
+  function drawFlask() {
+    const R0 = flaskR();
+    ctx.save();
+    ctx.translate(cx(), cy());
+
+    const g = ctx.createRadialGradient(0, -R0 * 0.3, 0, 0, 0, R0 * 1.25);
+    g.addColorStop(0, 'rgba(36, 70, 130, 0.9)');
+    g.addColorStop(0.55, 'rgba(14, 26, 60, 0.92)');
+    g.addColorStop(1, 'rgba(4, 6, 18, 0.95)');
+    ctx.fillStyle = g;
+    ctx.beginPath();
+    ctx.arc(0, 0, R0, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.lineWidth = 2.4;
+    ctx.strokeStyle = 'rgba(170, 200, 255, 0.6)';
+    ctx.beginPath();
+    ctx.arc(0, 0, R0, 0, Math.PI * 2);
+    ctx.stroke();
+
+    ctx.strokeStyle = 'rgba(220, 235, 255, 0.32)';
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.arc(0, 0, R0 - 4, Math.PI * 1.12, Math.PI * 1.44);
+    ctx.stroke();
+
+    ctx.fillStyle = 'rgba(12, 22, 52, 0.9)';
+    ctx.strokeStyle = 'rgba(170, 200, 255, 0.55)';
+    ctx.lineWidth = 2.2;
+    ctx.beginPath();
+    ctx.moveTo(-R0 * 0.22, -R0 * 0.97);
+    ctx.lineTo(-R0 * 0.18, -R0 * 1.35);
+    ctx.lineTo(R0 * 0.18, -R0 * 1.35);
+    ctx.lineTo(R0 * 0.22, -R0 * 0.97);
+    ctx.stroke();
+    ctx.fillRect(-R0 * 0.18, -R0 * 1.37, R0 * 0.36, 4);
+
+    ctx.fillStyle = 'rgba(190, 130, 85, 0.85)';
+    ctx.fillRect(-R0 * 0.55, R0 * 1.02, R0 * 1.1, 10);
+    ctx.fillRect(-R0 * 0.55, -R0 * 1.12 + 4, R0 * 1.1, 10);
+
+    ctx.strokeStyle = 'rgba(200, 140, 90, 0.75)';
+    ctx.lineWidth = 1.6;
+    ctx.beginPath();
+    ctx.moveTo(-R0 * 0.55, R0 * 1.07);
+    ctx.lineTo(-R0 * 0.95, R0 * 1.07);
+    ctx.lineTo(-R0 * 0.95, -R0 * 1.07);
+    ctx.lineTo(-R0 * 0.55, -R0 * 1.07);
+    ctx.stroke();
+
+    ctx.fillStyle = 'rgba(200, 140, 90, 0.8)';
+    ctx.font = '10px Georgia';
+    ctx.textAlign = 'center';
+    ctx.fillText('piezo', 0, R0 * 1.24);
+    ctx.fillText('piezo', 0, -R0 * 1.12);
+
+    ctx.restore();
+  }
+
+  function drawMotes() {
+    const R0 = flaskR();
+    ctx.save();
+    ctx.translate(cx(), cy());
+    for (const m of motes) {
+      m.p += 0.003 * m.s;
+      const wob = Math.sin(t * 3 + m.p) * 0.02;
+      const rr = (m.r + wob) * R0;
+      const x = Math.cos(m.a + t * 0.03 * m.s) * rr;
+      const y = Math.sin(m.a + t * 0.03 * m.s) * rr;
+      if (Math.hypot(x, y) > R0 * 0.93) continue;
+      ctx.fillStyle = 'rgba(200, 220, 255, ' + (0.25 + 0.35 * m.s) + ')';
+      ctx.beginPath();
+      ctx.arc(x, y, 0.9 + m.s * 0.6, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.restore();
+  }
+
+  function drawBubble() {
+    ctx.save();
+    ctx.translate(cx(), cy());
+
+    const px = Math.max(1.4, R * 2.4);
+
+    const compression = Math.max(0, (6 - R) / 6);
+    if (compression > 0.01) {
+      const hg = ctx.createRadialGradient(0, 0, 0, 0, 0, 80);
+      hg.addColorStop(0, 'rgba(200, 220, 255, ' + (0.18 * compression) + ')');
+      hg.addColorStop(1, 'rgba(180, 210, 255, 0)');
+      ctx.fillStyle = hg;
+      ctx.beginPath();
+      ctx.arc(0, 0, 80, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    const bg = ctx.createRadialGradient(-px * 0.3, -px * 0.3, 0, 0, 0, px);
+    bg.addColorStop(0, 'rgba(235, 245, 255, 0.95)');
+    bg.addColorStop(0.5, 'rgba(140, 180, 240, 0.6)');
+    bg.addColorStop(1, 'rgba(40, 70, 140, 0.25)');
+    ctx.fillStyle = bg;
+    ctx.beginPath();
+    ctx.arc(0, 0, px, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.strokeStyle = 'rgba(220, 235, 255, 0.75)';
+    ctx.lineWidth = 1;
+    ctx.stroke();
+
+    ctx.restore();
+  }
+
+  function drawFlash(f) {
+    const R0 = flaskR();
+    ctx.save();
+    ctx.translate(cx(), cy());
+    ctx.globalCompositeOperation = 'lighter';
+
+    const life = f.life;
+    const radius = (1 - life) * R0 * 1.5 + 10;
+    const alpha = Math.pow(life, 1.6);
+
+    const g1 = ctx.createRadialGradient(0, 0, 0, 0, 0, R0 * 1.2);
+    g1.addColorStop(0, 'rgba(230, 245, 255, ' + (0.95 * alpha) + ')');
+    g1.addColorStop(0.1, 'rgba(170, 210, 255, ' + (0.75 * alpha) + ')');
+    g1.addColorStop(0.35, 'rgba(90, 150, 255, ' + (0.28 * alpha) + ')');
+    g1.addColorStop(1, 'rgba(20, 40, 120, 0)');
+    ctx.fillStyle = g1;
+    ctx.beginPath();
+    ctx.arc(0, 0, R0 * 1.2, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.strokeStyle = 'rgba(180, 220, 255, ' + (alpha * 0.7) + ')';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.arc(0, 0, radius, 0, Math.PI * 2);
+    ctx.stroke();
+
+    const spokes = 20;
+    ctx.strokeStyle = 'rgba(240, 248, 255, ' + (alpha * 0.85) + ')';
+    ctx.lineWidth = 1.3;
+    for (let i = 0; i < spokes; i++) {
+      const a = (i / spokes) * Math.PI * 2 + f.rot;
+      const len = (1 - life) * R0 * 0.85 + 8;
+      ctx.beginPath();
+      ctx.moveTo(Math.cos(a) * 5, Math.sin(a) * 5);
+      ctx.lineTo(Math.cos(a) * len, Math.sin(a) * len);
+      ctx.stroke();
+    }
+
+    const cg = ctx.createRadialGradient(0, 0, 0, 0, 0, 22);
+    cg.addColorStop(0, 'rgba(255, 255, 255, ' + alpha + ')');
+    cg.addColorStop(0.5, 'rgba(220, 235, 255, ' + (alpha * 0.7) + ')');
+    cg.addColorStop(1, 'rgba(200, 220, 255, 0)');
+    ctx.fillStyle = cg;
+    ctx.beginPath();
+    ctx.arc(0, 0, 22, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.restore();
+  }
+
+  function drawShocks() {
+    ctx.save();
+    ctx.translate(cx(), cy());
+    ctx.globalCompositeOperation = 'lighter';
+    for (const s of shocks) {
+      const alpha = s.life * 0.45;
+      ctx.strokeStyle = 'rgba(130, 180, 255, ' + alpha + ')';
+      ctx.lineWidth = 1 + (1 - s.life) * 1.6;
+      ctx.beginPath();
+      ctx.arc(0, 0, s.r, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+    ctx.restore();
+  }
+
+  function drawWaveform() {
+    const barY = H - 56;
+    const barH = 38;
+    ctx.save();
+    ctx.strokeStyle = 'rgba(120, 160, 255, 0.75)';
+    ctx.lineWidth = 1.4;
+    ctx.beginPath();
+    const N = 260;
+    for (let i = 0; i < N; i++) {
+      const u = i / N;
+      const x = 40 + u * (W - 80);
+      const phase = t * 20 + u * Math.PI * 10;
+      const y = barY + Math.sin(phase) * (barH / 2) * (drive / 2.5);
+      if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+    }
+    ctx.stroke();
+
+    ctx.strokeStyle = 'rgba(120, 160, 255, 0.2)';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(40, barY);
+    ctx.lineTo(W - 40, barY);
+    ctx.stroke();
+
+    ctx.fillStyle = 'rgba(140, 170, 230, 0.7)';
+    ctx.font = '11px Georgia';
+    ctx.textAlign = 'left';
+    ctx.fillText('26.5 kHz acoustic drive', 40, barY - 10);
+    ctx.restore();
+  }
+
+  let dragging = false;
+  let dragStartY = 0;
+  let dragStartDrive = 0;
+  c.addEventListener('mousedown', (e) => {
+    dragging = true; dragStartY = e.clientY; dragStartDrive = targetDrive;
+  });
+  window.addEventListener('mouseup', () => dragging = false);
+  window.addEventListener('mousemove', (e) => {
+    if (!dragging) return;
+    const dy = dragStartY - e.clientY;
+    targetDrive = Math.max(0.2, Math.min(2.4, dragStartDrive + dy * 0.006));
+  });
+  c.addEventListener('touchstart', (e) => {
+    dragging = true; dragStartY = e.touches[0].clientY; dragStartDrive = targetDrive;
+    e.preventDefault();
+  }, { passive: false });
+  window.addEventListener('touchend', () => dragging = false);
+  window.addEventListener('touchmove', (e) => {
+    if (!dragging) return;
+    const dy = dragStartY - e.touches[0].clientY;
+    targetDrive = Math.max(0.2, Math.min(2.4, dragStartDrive + dy * 0.006));
+    e.preventDefault();
+  }, { passive: false });
+
+  const R0ref = 4.5;
+  const dtSim = 1 / 60 / 8;
+  function step() {
+    for (let k = 0; k < 8; k++) {
+      t += dtSim;
+      const P = -drive * Math.sin(omega * t);
+      const spring = (R - R0ref) * 9e5;
+      const damping = Rdot * 6;
+      const force = P * 1.8e6 - spring - damping;
+      Rdot += force * dtSim;
+      R += Rdot * dtSim;
+      if (R < 0.5) {
+        const impact = Math.min(1, Math.abs(Rdot) * 5e-4);
+        if (impact > 0.12) {
+          flashes.push({ life: 1, rot: Math.random() * Math.PI });
+          shocks.push({ r: 6, life: 1 });
+          flashCount++;
+        }
+        R = 0.5;
+        Rdot = -Rdot * 0.35;
+      }
+      if (R > 60) { R = 60; Rdot = 0; }
+    }
+    drive += (targetDrive - drive) * 0.05;
+  }
+
+  function frame() {
+    step();
+    drawBackground();
+    drawFlask();
+    drawStandingWave(Math.min(1.4, drive) * 0.85);
+    drawMotes();
+
+    for (let i = shocks.length - 1; i >= 0; i--) {
+      const s = shocks[i];
+      s.r += 6;
+      s.life -= 0.02;
+      if (s.life <= 0 || s.r > flaskR()) shocks.splice(i, 1);
+    }
+    drawShocks();
+
+    drawBubble();
+
+    for (let i = flashes.length - 1; i >= 0; i--) {
+      const f = flashes[i];
+      drawFlash(f);
+      f.life -= 0.055;
+      if (f.life <= 0) flashes.splice(i, 1);
+    }
+
+    drawWaveform();
+
+    drive_el.textContent = drive.toFixed(2);
+    rad_el.textContent = R.toFixed(1);
+    flash_el.textContent = flashCount.toString();
+
+    requestAnimationFrame(frame);
+  }
+
+  // Seed initial flash so thumbnail shows action
+  flashes.push({ life: 1, rot: 0.3 });
+  flashes.push({ life: 0.65, rot: 1.1 });
+  shocks.push({ r: 18, life: 0.9 });
+  shocks.push({ r: 52, life: 0.5 });
+  flashCount = 1;
+
+  frame();
+})();
+</script>
+</body>
+</html>

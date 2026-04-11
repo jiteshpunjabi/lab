@@ -1,0 +1,488 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>exp-073 — Letters Dissolving</title>
+<style>
+* { margin: 0; padding: 0; }
+body { overflow: hidden; background: #0e0a06; }
+canvas { display: block; width: 100vw; height: 100vh; }
+#overlay {
+  position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+  display: flex; flex-direction: column;
+  align-items: center; justify-content: center;
+  pointer-events: none; z-index: 10;
+}
+#typed-text {
+  font: 22px/1.6 Georgia, 'Times New Roman', serif;
+  color: rgba(220, 200, 170, 0.7);
+  text-align: center;
+  max-width: 600px;
+  pointer-events: none;
+  text-shadow: 0 0 20px rgba(255, 180, 60, 0.2);
+  letter-spacing: 0.5px;
+}
+#prompt {
+  font: italic 13px Georgia, serif;
+  color: rgba(180, 160, 130, 0.4);
+  margin-top: 20px;
+  pointer-events: none;
+}
+#cursor {
+  display: inline-block;
+  width: 2px; height: 24px;
+  background: rgba(255, 180, 80, 0.6);
+  vertical-align: text-bottom;
+  animation: blink 1s ease-in-out infinite alternate;
+}
+@keyframes blink { 0% { opacity: 0.2; } 100% { opacity: 0.9; } }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="overlay">
+  <div id="typed-text"><span id="cursor"></span></div>
+  <div id="prompt">type your unsent words. they will dissolve into pattern.</div>
+</div>
+<script>
+(() => {
+  const canvas = document.getElementById('c');
+  const gl = canvas.getContext('webgl', { preserveDrawingBuffer: true });
+  canvas.width = 1280; canvas.height = 720;
+  gl.viewport(0, 0, canvas.width, canvas.height);
+
+  const ext = gl.getExtension('OES_texture_float');
+  const useFloat = !!ext;
+
+  const SIM_W = 512, SIM_H = 288;
+
+  // Presets that evoke emotional states
+  const moods = [
+    { name: 'longing',    f: 0.0367, k: 0.0649, hueBase: 0.05 },  // mitosis-like
+    { name: 'grief',      f: 0.029,  k: 0.057,  hueBase: 0.6  },  // maze
+    { name: 'tenderness', f: 0.0545, k: 0.062,  hueBase: 0.08 },  // coral
+    { name: 'rage',       f: 0.078,  k: 0.061,  hueBase: 0.0  },  // worms
+    { name: 'peace',      f: 0.014,  k: 0.054,  hueBase: 0.35 },  // pulsing
+  ];
+  let moodIdx = 0;
+  let moodBlend = 0;
+
+  // Text system (from exp-070's emotional narrative)
+  let typedChars = [];
+  let fullText = '';
+  let lastCharTime = 0;
+  let totalCharsEver = 0;
+  const textEl = document.getElementById('typed-text');
+  const promptEl = document.getElementById('prompt');
+
+  // Detect emotion from typed characters
+  function detectMood(text) {
+    const lower = text.toLowerCase();
+    if (/miss|gone|wait|away|remember|left/.test(lower)) return 0; // longing
+    if (/sorry|lost|never|end|dark|cry/.test(lower)) return 1; // grief
+    if (/love|dear|warm|soft|gentle|hold/.test(lower)) return 2; // tenderness
+    if (/hate|burn|break|scream|why|fury/.test(lower)) return 3; // rage
+    if (/still|quiet|peace|calm|rest|light/.test(lower)) return 4; // peace
+    return moodIdx; // keep current
+  }
+
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Backspace') {
+      typedChars.pop();
+    } else if (e.key === 'Enter') {
+      typedChars.push('\n');
+      seedFromText();
+    } else if (e.key === 'Escape') {
+      typedChars = [];
+      seedState();
+    } else if (e.key.length === 1) {
+      typedChars.push(e.key);
+      lastCharTime = performance.now();
+      totalCharsEver++;
+      seedCharacter(e.key);
+
+      // Shift mood
+      fullText = typedChars.join('');
+      const newMood = detectMood(fullText);
+      if (newMood !== moodIdx) {
+        moodIdx = newMood;
+        moodBlend = 0;
+      }
+    }
+
+    // Update displayed text
+    fullText = typedChars.join('');
+    textEl.innerHTML = fullText.replace(/\n/g, '<br>') + '<span id="cursor"></span>';
+
+    if (typedChars.length > 0) {
+      promptEl.style.opacity = '0';
+    }
+  });
+
+  // Seed reaction-diffusion from character position
+  function seedCharacter(char) {
+    const charCode = char.charCodeAt(0);
+    // Map character to position in simulation grid
+    const col = (totalCharsEver * 37) % SIM_W;
+    const row = ((charCode * 7 + totalCharsEver * 13) % SIM_H);
+    seedQueue.push({ x: col, y: row, radius: 4 + (charCode % 5) });
+  }
+
+  function seedFromText() {
+    for (let i = 0; i < 5; i++) {
+      seedQueue.push({
+        x: Math.floor(Math.random() * (SIM_W - 20) + 10),
+        y: Math.floor(Math.random() * (SIM_H - 20) + 10),
+        radius: 3 + Math.floor(Math.random() * 6)
+      });
+    }
+  }
+
+  const seedQueue = [];
+
+  // --- Shaders (from exp-024's reaction-diffusion) ---
+  const quadVS = `
+  attribute vec2 a_pos;
+  varying vec2 v_uv;
+  void main() {
+    v_uv = a_pos * 0.5 + 0.5;
+    gl_Position = vec4(a_pos, 0.0, 1.0);
+  }`;
+
+  const simFS = `
+  precision highp float;
+  varying vec2 v_uv;
+  uniform sampler2D u_state;
+  uniform vec2 u_simSize;
+  uniform float u_feed;
+  uniform float u_kill;
+  uniform vec2 u_seedPos;
+  uniform float u_seedRadius;
+  uniform float u_seedActive;
+
+  void main() {
+    vec2 texel = 1.0 / u_simSize;
+    vec2 uv = v_uv;
+    vec4 cur = texture2D(u_state, uv);
+    float a = cur.r;
+    float b = cur.g;
+
+    float lA = 0.0, lB = 0.0;
+    vec2 offsets[8];
+    offsets[0] = vec2(-1.0, -1.0);
+    offsets[1] = vec2( 0.0, -1.0);
+    offsets[2] = vec2( 1.0, -1.0);
+    offsets[3] = vec2(-1.0,  0.0);
+    offsets[4] = vec2( 1.0,  0.0);
+    offsets[5] = vec2(-1.0,  1.0);
+    offsets[6] = vec2( 0.0,  1.0);
+    offsets[7] = vec2( 1.0,  1.0);
+
+    float weights[8];
+    weights[0] = 0.05; weights[1] = 0.2; weights[2] = 0.05;
+    weights[3] = 0.2;                     weights[4] = 0.2;
+    weights[5] = 0.05; weights[6] = 0.2;  weights[7] = 0.05;
+
+    for (int i = 0; i < 8; i++) {
+      vec2 sUV = fract(uv + offsets[i] * texel);
+      vec4 s = texture2D(u_state, sUV);
+      lA += s.r * weights[i];
+      lB += s.g * weights[i];
+    }
+    lA -= a;
+    lB -= b;
+
+    float dA = 1.0, dB = 0.5;
+    float abb = a * b * b;
+    float nextA = a + dA * lA - abb + u_feed * (1.0 - a);
+    float nextB = b + dB * lB + abb - (u_kill + u_feed) * b;
+    nextA = clamp(nextA, 0.0, 1.0);
+    nextB = clamp(nextB, 0.0, 1.0);
+
+    // Seed from typed characters
+    if (u_seedActive > 0.5) {
+      vec2 diff = (uv * u_simSize - u_seedPos);
+      float d = length(diff);
+      if (d < u_seedRadius) {
+        float w = exp(-d * d / (u_seedRadius * 2.0));
+        nextA = mix(nextA, 0.0, w);
+        nextB = mix(nextB, 1.0, w);
+      }
+    }
+
+    gl_FragColor = vec4(nextA, nextB, cur.b * 0.998, 1.0);
+  }`;
+
+  // Display shader: emotional stained-glass from exp-024 + candlelight warmth from exp-070
+  const displayFS = `
+  precision highp float;
+  varying vec2 v_uv;
+  uniform sampler2D u_state;
+  uniform float u_time;
+  uniform vec2 u_resolution;
+  uniform float u_hueBase;
+  uniform float u_textIntensity;
+
+  vec3 hsv2rgb(float h, float s, float v) {
+    vec3 c = vec3(h * 6.0, s, v);
+    vec3 rgb = clamp(abs(mod(c.x + vec3(0.0, 4.0, 2.0), 6.0) - 3.0) - 1.0, 0.0, 1.0);
+    return v * mix(vec3(1.0), rgb, s);
+  }
+
+  void main() {
+    vec2 uv = v_uv;
+    vec2 p = (gl_FragCoord.xy - 0.5 * u_resolution) / min(u_resolution.x, u_resolution.y);
+    float t = u_time * 0.3;
+
+    vec4 rd = texture2D(u_state, uv);
+    float a = rd.r;
+    float b = rd.g;
+
+    // Stained-glass tessellation modulated by RD (from exp-024)
+    float s1 = sin(p.x * 7.0 + t + b * 5.0) * cos(p.y * 7.0 - t * 0.6 + a * 3.0);
+    float s2 = sin((p.x * 0.866 + p.y * 0.5) * 9.0 + t * 1.1 + b * 4.0) *
+               cos((p.x * 0.5 - p.y * 0.866) * 9.0 - t * 0.8 + a * 2.5);
+    float s3 = sin(length(p) * 10.0 - t * 1.5 + b * 6.0) * 0.5;
+    float cell = s1 + s2 + s3;
+
+    // Leaded glass edges
+    float edge = 1.0 - smoothstep(0.0, 0.1 + b * 0.08, abs(cell));
+
+    // RD boundary glow
+    float rdEdgeX = abs(texture2D(u_state, uv + vec2(0.003, 0.0)).g - b);
+    float rdEdgeY = abs(texture2D(u_state, uv + vec2(0.0, 0.003)).g - b);
+    float rdEdge = (rdEdgeX + rdEdgeY) * 6.0;
+
+    // Emotional color: hue from mood + RD concentration
+    float hue = fract(u_hueBase + atan(p.y, p.x) / 6.2832 * 0.3 + t * 0.05 + b * 0.3);
+    float sat = 0.5 + 0.4 * sin(cell * 3.14 + b * 2.0);
+    float val = 0.15 + 0.5 * (0.5 + 0.5 * sin(cell * 2.0 + t)) * (0.2 + b * 1.5);
+
+    // Candlelight warmth (from exp-070)
+    float warmth = 0.1 + u_textIntensity * 0.15;
+    hue = fract(hue + b * 0.2 + warmth * 0.05);
+    sat = mix(sat, sat * 0.8, warmth);
+
+    vec3 color = hsv2rgb(hue, sat, val);
+
+    // Warm leaded edges like candlelight on glass
+    vec3 leadColor = mix(vec3(1.0, 0.9, 0.7), vec3(1.0, 0.7, 0.4), warmth);
+    color = mix(color, leadColor, edge * 0.5);
+
+    // RD boundary: soft amber glow (candlelit glass edges)
+    vec3 glowColor = mix(vec3(0.5, 0.85, 1.0), vec3(1.0, 0.8, 0.5), warmth);
+    color = mix(color, glowColor, rdEdge * 0.4);
+
+    // Candlelight vignette (from exp-070's radial glow)
+    float vignette = 1.0 - length(p) * 0.7;
+    vignette = clamp(vignette, 0.0, 1.0);
+    color *= 0.5 + vignette * 0.6;
+
+    // Flicker (from exp-070's candle)
+    float flicker = 0.95 + 0.05 * sin(t * 7.0) * sin(t * 11.0 + 1.3);
+    color *= flicker;
+
+    // Deep warm base
+    color = max(color, vec3(0.04, 0.02, 0.01));
+
+    // Text intensity drives overall brightness
+    color *= 0.8 + u_textIntensity * 0.4;
+
+    gl_FragColor = vec4(color, 1.0);
+  }`;
+
+  // --- WebGL helpers ---
+  function compileShader(src, type) {
+    const s = gl.createShader(type);
+    gl.shaderSource(s, src);
+    gl.compileShader(s);
+    if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) console.error(gl.getShaderInfoLog(s));
+    return s;
+  }
+  function createProgram(vsSrc, fsSrc) {
+    const vs = compileShader(vsSrc, gl.VERTEX_SHADER);
+    const fs = compileShader(fsSrc, gl.FRAGMENT_SHADER);
+    const prog = gl.createProgram();
+    gl.attachShader(prog, vs); gl.attachShader(prog, fs);
+    gl.linkProgram(prog);
+    if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) console.error(gl.getProgramInfoLog(prog));
+    return prog;
+  }
+
+  const quadBuf = gl.createBuffer();
+  gl.bindBuffer(gl.ARRAY_BUFFER, quadBuf);
+  gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1,-1,1,-1,-1,1,-1,1,1,-1,1,1]), gl.STATIC_DRAW);
+
+  const simProg = createProgram(quadVS, simFS);
+  const displayProg = createProgram(quadVS, displayFS);
+
+  const simU = {
+    state: gl.getUniformLocation(simProg, 'u_state'),
+    simSize: gl.getUniformLocation(simProg, 'u_simSize'),
+    feed: gl.getUniformLocation(simProg, 'u_feed'),
+    kill: gl.getUniformLocation(simProg, 'u_kill'),
+    seedPos: gl.getUniformLocation(simProg, 'u_seedPos'),
+    seedRadius: gl.getUniformLocation(simProg, 'u_seedRadius'),
+    seedActive: gl.getUniformLocation(simProg, 'u_seedActive'),
+  };
+  const dispU = {
+    state: gl.getUniformLocation(displayProg, 'u_state'),
+    time: gl.getUniformLocation(displayProg, 'u_time'),
+    resolution: gl.getUniformLocation(displayProg, 'u_resolution'),
+    hueBase: gl.getUniformLocation(displayProg, 'u_hueBase'),
+    textIntensity: gl.getUniformLocation(displayProg, 'u_textIntensity'),
+  };
+
+  function createStateTex() {
+    const tex = gl.createTexture();
+    gl.bindTexture(gl.TEXTURE_2D, tex);
+    if (useFloat) gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, SIM_W, SIM_H, 0, gl.RGBA, gl.FLOAT, null);
+    else gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, SIM_W, SIM_H, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.REPEAT);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.REPEAT);
+    return tex;
+  }
+  function createFBO(tex) {
+    const fbo = gl.createFramebuffer();
+    gl.bindFramebuffer(gl.FRAMEBUFFER, fbo);
+    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, tex, 0);
+    return fbo;
+  }
+
+  const texA = createStateTex(), texB = createStateTex();
+  const fboA = createFBO(texA), fboB = createFBO(texB);
+
+  function seedState() {
+    const n = SIM_W * SIM_H;
+    const data = useFloat ? new Float32Array(n * 4) : new Uint8Array(n * 4);
+    const max = useFloat ? 1.0 : 255;
+    for (let i = 0; i < n; i++) {
+      data[i*4] = max;
+      data[i*4+1] = 0;
+      data[i*4+2] = 0;
+      data[i*4+3] = max;
+    }
+    // Seed a few initial patches so there's something to see before typing
+    function addSeed(cx, cy, r) {
+      for (let dy = -r; dy <= r; dy++) {
+        for (let dx = -r; dx <= r; dx++) {
+          if (dx*dx + dy*dy > r*r) continue;
+          const x = ((cx+dx)%SIM_W+SIM_W)%SIM_W;
+          const y = ((cy+dy)%SIM_H+SIM_H)%SIM_H;
+          const i = y * SIM_W + x;
+          data[i*4] = 0;
+          data[i*4+1] = max;
+        }
+      }
+    }
+    for (let s = 0; s < 8; s++) {
+      addSeed(
+        Math.floor(Math.random() * (SIM_W - 20) + 10),
+        Math.floor(Math.random() * (SIM_H - 20) + 10),
+        Math.floor(Math.random() * 5 + 3)
+      );
+    }
+    addSeed(SIM_W/2|0, SIM_H/2|0, 10);
+    gl.bindTexture(gl.TEXTURE_2D, texA);
+    if (useFloat) gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, SIM_W, SIM_H, 0, gl.RGBA, gl.FLOAT, data);
+    else gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, SIM_W, SIM_H, 0, gl.RGBA, gl.UNSIGNED_BYTE, data);
+  }
+  seedState();
+
+  let readTex = texA, writeTex = texB, readFBO = fboA, writeFBO = fboB;
+
+  function drawQuad(prog) {
+    const aPos = gl.getAttribLocation(prog, 'a_pos');
+    gl.bindBuffer(gl.ARRAY_BUFFER, quadBuf);
+    gl.enableVertexAttribArray(aPos);
+    gl.vertexAttribPointer(aPos, 2, gl.FLOAT, false, 0, 0);
+    gl.drawArrays(gl.TRIANGLES, 0, 6);
+  }
+
+  // Text intensity decays over time (from exp-070's ink fading)
+  let textIntensity = 0;
+
+  function frame(timestamp) {
+    const time = timestamp * 0.001;
+    const mood = moods[moodIdx];
+
+    // Blend toward target mood
+    moodBlend = Math.min(1, moodBlend + 0.005);
+    const feed = mood.f;
+    const kill = mood.k;
+
+    // Text intensity rises when typing, decays when idle (like ink fading in exp-070)
+    const timeSinceChar = performance.now() - lastCharTime;
+    if (timeSinceChar < 500) {
+      textIntensity = Math.min(1, textIntensity + 0.05);
+    } else {
+      textIntensity *= 0.998;
+    }
+
+    // Fade typed text over time (like exp-070's absence mechanic)
+    if (timeSinceChar > 15000 && typedChars.length > 0) {
+      const fadeAlpha = Math.max(0.1, 1 - (timeSinceChar - 15000) / 30000);
+      textEl.style.opacity = fadeAlpha;
+      if (fadeAlpha <= 0.1) {
+        typedChars = [];
+        textEl.innerHTML = '<span id="cursor"></span>';
+        textEl.style.opacity = '1';
+        promptEl.style.opacity = '0.4';
+        promptEl.textContent = 'the words dissolved. type again.';
+      }
+    } else {
+      textEl.style.opacity = '1';
+    }
+
+    // Process seed queue — inject typed characters into RD simulation
+    const currentSeed = seedQueue.length > 0 ? seedQueue.shift() : null;
+
+    // Run RD simulation steps
+    for (let step = 0; step < 8; step++) {
+      gl.bindFramebuffer(gl.FRAMEBUFFER, writeFBO);
+      gl.viewport(0, 0, SIM_W, SIM_H);
+      gl.useProgram(simProg);
+      gl.activeTexture(gl.TEXTURE0);
+      gl.bindTexture(gl.TEXTURE_2D, readTex);
+      gl.uniform1i(simU.state, 0);
+      gl.uniform2f(simU.simSize, SIM_W, SIM_H);
+      gl.uniform1f(simU.feed, feed);
+      gl.uniform1f(simU.kill, kill);
+
+      if (currentSeed && step === 0) {
+        gl.uniform2f(simU.seedPos, currentSeed.x, currentSeed.y);
+        gl.uniform1f(simU.seedRadius, currentSeed.radius);
+        gl.uniform1f(simU.seedActive, 1.0);
+      } else {
+        gl.uniform1f(simU.seedActive, 0.0);
+      }
+
+      drawQuad(simProg);
+      [readTex, writeTex] = [writeTex, readTex];
+      [readFBO, writeFBO] = [writeFBO, readFBO];
+    }
+
+    // Display
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    gl.viewport(0, 0, canvas.width, canvas.height);
+    gl.useProgram(displayProg);
+    gl.activeTexture(gl.TEXTURE0);
+    gl.bindTexture(gl.TEXTURE_2D, readTex);
+    gl.uniform1i(dispU.state, 0);
+    gl.uniform1f(dispU.time, time);
+    gl.uniform2f(dispU.resolution, canvas.width, canvas.height);
+    gl.uniform1f(dispU.hueBase, mood.hueBase);
+    gl.uniform1f(dispU.textIntensity, textIntensity);
+
+    drawQuad(displayProg);
+    requestAnimationFrame(frame);
+  }
+
+  requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>

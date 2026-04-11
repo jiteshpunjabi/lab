@@ -1,0 +1,356 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=1280,height=720">
+<title>Abyssal Tilt</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { width: 1280px; height: 720px; overflow: hidden; background: #000; }
+canvas { display: block; }
+#act-label {
+  position: fixed; top: 20px; left: 50%; transform: translateX(-50%);
+  font-family: 'Georgia', serif; color: rgba(120,200,255,0.0);
+  font-size: 18px; letter-spacing: 4px; text-transform: uppercase;
+  transition: color 3s ease; pointer-events: none; z-index: 10;
+}
+#depth-gauge {
+  position: fixed; right: 30px; top: 50%; transform: translateY(-50%);
+  width: 3px; height: 400px; background: rgba(80,150,200,0.15);
+  border-radius: 2px; pointer-events: none; z-index: 10;
+}
+#depth-marker {
+  width: 9px; height: 9px; border-radius: 50%;
+  background: rgba(100,200,255,0.7); position: absolute;
+  left: -3px; top: 0; transition: top 0.3s ease;
+  box-shadow: 0 0 8px rgba(100,200,255,0.4);
+}
+#depth-text {
+  position: fixed; right: 50px; color: rgba(100,180,220,0.4);
+  font-family: monospace; font-size: 11px; pointer-events: none; z-index: 10;
+}
+</style>
+</head>
+<body>
+<div id="act-label"></div>
+<div id="depth-gauge"><div id="depth-marker"></div></div>
+<div id="depth-text"></div>
+<canvas id="c"></canvas>
+<script>
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d');
+const W = 1280, H = 720;
+canvas.width = W; canvas.height = H;
+
+const label = document.getElementById('act-label');
+const depthMarker = document.getElementById('depth-marker');
+const depthText = document.getElementById('depth-text');
+
+let gx = 0, gy = 0.15;
+let mouseActive = false;
+
+canvas.addEventListener('mousemove', e => {
+  mouseActive = true;
+  gx = (e.clientX / W - 0.5) * 0.5;
+  gy = (e.clientY / H - 0.5) * 0.5;
+});
+
+window.addEventListener('deviceorientation', e => {
+  if (e.gamma !== null && !mouseActive) {
+    gx = Math.max(-1, Math.min(1, (e.gamma / 45))) * 0.4;
+    gy = Math.max(-1, Math.min(1, (e.beta - 45) / 45)) * 0.4;
+  }
+});
+
+const TOTAL_DURATION = 75000;
+const startTime = Date.now();
+
+function getPhase() {
+  const elapsed = Date.now() - startTime;
+  const t = Math.min(elapsed / TOTAL_DURATION, 1.0);
+  if (t < 0.25) return { act: 1, local: t / 0.25, t, name: 'I. THE DESCENT' };
+  if (t < 0.65) return { act: 2, local: (t - 0.25) / 0.4, t, name: 'II. THE BLOOM' };
+  return { act: 3, local: (t - 0.65) / 0.35, t, name: 'III. THE ASCENT' };
+}
+
+class Creature {
+  constructor(type) {
+    this.type = type;
+    this.x = Math.random() * W;
+    this.y = Math.random() * H;
+    this.vx = (Math.random() - 0.5) * 0.3;
+    this.vy = (Math.random() - 0.5) * 0.3;
+    this.size = type === 'plankton' ? 1.5 + Math.random() * 2.5 :
+                type === 'jellyfish' ? 18 + Math.random() * 30 :
+                type === 'angler' ? 12 + Math.random() * 16 :
+                25 + Math.random() * 35;
+    this.pulsePhase = Math.random() * Math.PI * 2;
+    this.pulseSpeed = 0.015 + Math.random() * 0.025;
+    this.hue = type === 'jellyfish' ? 170 + Math.random() * 70 :
+               type === 'angler' ? 35 + Math.random() * 35 :
+               type === 'plankton' ? 130 + Math.random() * 120 :
+               265 + Math.random() * 65;
+    this.brightness = 0;
+    this.targetBrightness = 0;
+    this.tentaclePhase = Math.random() * Math.PI * 2;
+  }
+
+  update(phase) {
+    this.pulsePhase += this.pulseSpeed;
+    this.tentaclePhase += 0.012;
+    this.vx += gx * 0.008;
+    this.vy += gy * 0.008;
+    if (this.type === 'jellyfish') this.vy -= 0.003;
+    this.vx *= 0.994;
+    this.vy *= 0.994;
+    this.vx += (Math.random() - 0.5) * 0.015;
+    this.vy += (Math.random() - 0.5) * 0.015;
+    this.x += this.vx;
+    this.y += this.vy;
+    const m = 60;
+    if (this.x < -m) this.x = W + m;
+    if (this.x > W + m) this.x = -m;
+    if (this.y < -m) this.y = H + m;
+    if (this.y > H + m) this.y = -m;
+    if (phase.act === 1) this.targetBrightness = 0.25 + phase.local * 0.35;
+    else if (phase.act === 2) this.targetBrightness = 0.6 + phase.local * 0.4;
+    else this.targetBrightness = 1.0 - phase.local * 0.7;
+    this.brightness += (this.targetBrightness - this.brightness) * 0.02;
+  }
+
+  draw(ctx) {
+    const pulse = Math.sin(this.pulsePhase) * 0.3 + 0.7;
+    const alpha = this.brightness * pulse;
+    if (alpha < 0.01) return;
+    ctx.save();
+    ctx.translate(this.x, this.y);
+    if (this.type === 'jellyfish') this.drawJellyfish(ctx, alpha, pulse);
+    else if (this.type === 'angler') this.drawAngler(ctx, alpha, pulse);
+    else if (this.type === 'plankton') this.drawPlankton(ctx, alpha);
+    else this.drawSiphonophore(ctx, alpha, pulse);
+    ctx.restore();
+  }
+
+  drawJellyfish(ctx, alpha, pulse) {
+    const s = this.size * (0.9 + pulse * 0.1);
+    const outerGrad = ctx.createRadialGradient(0, -s*0.1, s*0.2, 0, -s*0.1, s*1.8);
+    outerGrad.addColorStop(0, 'hsla('+this.hue+', 100%, 65%, '+(alpha*0.15)+')');
+    outerGrad.addColorStop(1, 'hsla('+this.hue+', 100%, 40%, 0)');
+    ctx.fillStyle = outerGrad;
+    ctx.beginPath();
+    ctx.arc(0, -s*0.1, s*1.8, 0, Math.PI*2);
+    ctx.fill();
+    const grad = ctx.createRadialGradient(0, -s*0.15, 0, 0, -s*0.1, s*0.7);
+    grad.addColorStop(0, 'hsla('+(this.hue+15)+', 100%, 85%, '+(alpha*0.8)+')');
+    grad.addColorStop(0.4, 'hsla('+this.hue+', 90%, 55%, '+(alpha*0.5)+')');
+    grad.addColorStop(1, 'hsla('+(this.hue-10)+', 100%, 30%, 0)');
+    ctx.fillStyle = grad;
+    ctx.beginPath();
+    ctx.ellipse(0, -s*0.1, s*0.7, s*0.5, 0, Math.PI, 0);
+    ctx.fill();
+    const coreGrad = ctx.createRadialGradient(0, -s*0.2, 0, 0, -s*0.2, s*0.25);
+    coreGrad.addColorStop(0, 'hsla('+(this.hue+30)+', 100%, 95%, '+(alpha*0.9)+')');
+    coreGrad.addColorStop(1, 'hsla('+this.hue+', 80%, 60%, 0)');
+    ctx.fillStyle = coreGrad;
+    ctx.beginPath();
+    ctx.arc(0, -s*0.2, s*0.25, 0, Math.PI*2);
+    ctx.fill();
+    ctx.lineWidth = 1.2;
+    for (var i = 0; i < 7; i++) {
+      var tx = (i - 3) * s * 0.18;
+      ctx.strokeStyle = 'hsla('+(this.hue+10)+', 70%, 65%, '+(alpha * 0.5 * (1 - Math.abs(i-3)/4))+')';
+      ctx.beginPath();
+      ctx.moveTo(tx, s*0.05);
+      for (var j = 1; j <= 10; j++) {
+        var wave = Math.sin(this.tentaclePhase + i*0.6 + j*0.35) * s * 0.12 * (j/10);
+        ctx.lineTo(tx + wave, s*0.05 + j * s * 0.12);
+      }
+      ctx.stroke();
+    }
+  }
+
+  drawAngler(ctx, alpha, pulse) {
+    var s = this.size;
+    ctx.fillStyle = 'hsla('+(this.hue-10)+', 40%, 12%, '+(alpha*0.7)+')';
+    ctx.beginPath();
+    ctx.ellipse(0, 0, s, s*0.55, 0, 0, Math.PI*2);
+    ctx.fill();
+    var lx = s*0.2, ly = -s*0.95;
+    var lureGrad = ctx.createRadialGradient(lx, ly, 0, lx, ly, s*0.7);
+    lureGrad.addColorStop(0, 'hsla('+(this.hue+15)+', 100%, 97%, '+(alpha*pulse)+')');
+    lureGrad.addColorStop(0.2, 'hsla('+this.hue+', 100%, 75%, '+(alpha*0.6)+')');
+    lureGrad.addColorStop(0.6, 'hsla('+(this.hue-10)+', 90%, 45%, '+(alpha*0.15)+')');
+    lureGrad.addColorStop(1, 'hsla('+this.hue+', 100%, 30%, 0)');
+    ctx.fillStyle = lureGrad;
+    ctx.beginPath();
+    ctx.arc(lx, ly, s*0.7, 0, Math.PI*2);
+    ctx.fill();
+    ctx.strokeStyle = 'hsla('+this.hue+', 35%, 35%, '+(alpha*0.4)+')';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(0, -s*0.3);
+    ctx.quadraticCurveTo(s*0.4, -s*0.7, lx, ly);
+    ctx.stroke();
+    ctx.fillStyle = 'hsla('+(this.hue+50)+', 80%, 85%, '+(alpha*0.7)+')';
+    ctx.beginPath();
+    ctx.arc(-s*0.35, -s*0.08, s*0.09, 0, Math.PI*2);
+    ctx.fill();
+  }
+
+  drawPlankton(ctx, alpha) {
+    var s = this.size;
+    var grad = ctx.createRadialGradient(0, 0, 0, 0, 0, s*2.5);
+    grad.addColorStop(0, 'hsla('+this.hue+', 100%, 85%, '+(alpha*0.9)+')');
+    grad.addColorStop(0.3, 'hsla('+this.hue+', 100%, 65%, '+(alpha*0.3)+')');
+    grad.addColorStop(1, 'hsla('+this.hue+', 100%, 40%, 0)');
+    ctx.fillStyle = grad;
+    ctx.beginPath();
+    ctx.arc(0, 0, s*2.5, 0, Math.PI*2);
+    ctx.fill();
+  }
+
+  drawSiphonophore(ctx, alpha, pulse) {
+    var s = this.size;
+    var segs = 10 + Math.floor(s/6);
+    for (var i = 0; i < segs; i++) {
+      var t = i / segs;
+      var sx = Math.sin(this.tentaclePhase + i*0.45) * s*0.35;
+      var sy = i * s*0.18;
+      var segSize = s*0.12 * (1 - t*0.4);
+      var segHue = this.hue + i*10;
+      var a = alpha * (1 - t*0.4) * pulse;
+      var grad = ctx.createRadialGradient(sx, sy, 0, sx, sy, segSize*2.5);
+      grad.addColorStop(0, 'hsla('+segHue+', 100%, 85%, '+a+')');
+      grad.addColorStop(0.4, 'hsla('+segHue+', 90%, 55%, '+(a*0.35)+')');
+      grad.addColorStop(1, 'hsla('+segHue+', 80%, 30%, 0)');
+      ctx.fillStyle = grad;
+      ctx.beginPath();
+      ctx.arc(sx, sy, segSize*2.5, 0, Math.PI*2);
+      ctx.fill();
+      if (i > 0) {
+        var px = Math.sin(this.tentaclePhase + (i-1)*0.45) * s*0.35;
+        var py = (i-1) * s*0.18;
+        ctx.strokeStyle = 'hsla('+segHue+', 70%, 55%, '+(a*0.25)+')';
+        ctx.lineWidth = 0.8;
+        ctx.beginPath();
+        ctx.moveTo(px, py);
+        ctx.lineTo(sx, sy);
+        ctx.stroke();
+      }
+    }
+  }
+}
+
+class MarineSnow {
+  constructor() { this.reset(true); }
+  reset(initial) {
+    this.x = Math.random() * W;
+    this.y = initial ? Math.random() * H : -5;
+    this.size = 0.4 + Math.random() * 1.2;
+    this.hue = 160 + Math.random() * 80;
+    this.alpha = 0;
+    this.maxAlpha = 0.1 + Math.random() * 0.3;
+    this.drift = (Math.random() - 0.5) * 0.15;
+    this.fallSpeed = 0.15 + Math.random() * 0.3;
+    this.flicker = Math.random() * Math.PI * 2;
+    this.flickerSpeed = 0.008 + Math.random() * 0.03;
+  }
+  update(phase) {
+    this.flicker += this.flickerSpeed;
+    this.x += this.drift + gx * 0.4;
+    this.y += this.fallSpeed + gy * 0.3;
+    if (this.y > H + 10 || this.x < -20 || this.x > W + 20) this.reset(false);
+    var mult = phase.act === 1 ? 0.3 + phase.local * 0.4 :
+               phase.act === 2 ? 0.7 + phase.local * 0.3 :
+               1.0 - phase.local * 0.5;
+    this.alpha += (this.maxAlpha * mult - this.alpha) * 0.04;
+  }
+  draw(ctx) {
+    var a = this.alpha * (0.5 + Math.sin(this.flicker) * 0.5);
+    if (a < 0.005) return;
+    ctx.fillStyle = 'hsla('+this.hue+', 100%, 80%, '+a+')';
+    ctx.beginPath();
+    ctx.arc(this.x, this.y, this.size, 0, Math.PI * 2);
+    ctx.fill();
+  }
+}
+
+var creatures = [];
+for (var i = 0; i < 8; i++) creatures.push(new Creature('jellyfish'));
+for (var i = 0; i < 5; i++) creatures.push(new Creature('angler'));
+for (var i = 0; i < 100; i++) creatures.push(new Creature('plankton'));
+for (var i = 0; i < 4; i++) creatures.push(new Creature('siphonophore'));
+
+var snowArr = [];
+for (var i = 0; i < 300; i++) snowArr.push(new MarineSnow());
+
+function drawBackground(phase) {
+  ctx.fillStyle = 'rgba(0, 3, 12, 0.11)';
+  ctx.fillRect(0, 0, W, H);
+  if (phase.act >= 2 || (phase.act === 1 && phase.local > 0.3)) {
+    var a = phase.act === 1 ? (phase.local - 0.3) * 0.025 :
+            phase.act === 2 ? 0.015 + phase.local * 0.015 :
+            0.03 * (1 - phase.local);
+    var grad = ctx.createLinearGradient(0, 0, 0, H);
+    grad.addColorStop(0, 'rgba(0, 12, 35, '+a+')');
+    grad.addColorStop(1, 'rgba(0, 5, 18, '+a+')');
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, W, H);
+  }
+}
+
+function updateDepth(phase) {
+  var depth = phase.act === 1 ? 200 + phase.local * 3800 :
+              phase.act === 2 ? 4000 + phase.local * 2000 :
+              6000 - phase.local * 5800;
+  depthMarker.style.top = (phase.t * 390) + 'px';
+  depthText.style.top = (50 + phase.t * 390) + '%';
+  depthText.textContent = Math.floor(depth) + 'm';
+}
+
+var lastAct = 0;
+var labelTimeout = null;
+function showLabel(text) {
+  label.textContent = text;
+  label.style.color = 'rgba(120, 200, 255, 0.6)';
+  clearTimeout(labelTimeout);
+  labelTimeout = setTimeout(function() {
+    label.style.color = 'rgba(120, 200, 255, 0.0)';
+  }, 4000);
+}
+
+var spawnTimer = 0;
+
+function animate() {
+  var phase = getPhase();
+  if (phase.act !== lastAct) {
+    lastAct = phase.act;
+    showLabel(phase.name);
+  }
+  drawBackground(phase);
+  updateDepth(phase);
+
+  if (phase.act === 2 && spawnTimer++ % 45 === 0 && creatures.length < 170) {
+    var types = ['jellyfish', 'angler', 'plankton', 'siphonophore'];
+    var weights = [0.25, 0.15, 0.45, 0.15];
+    var r = Math.random(), cum = 0, type = 'plankton';
+    for (var i = 0; i < types.length; i++) { cum += weights[i]; if (r < cum) { type = types[i]; break; } }
+    var c = new Creature(type);
+    if (Math.random() > 0.5) c.x = Math.random() > 0.5 ? -40 : W + 40;
+    else c.y = Math.random() > 0.5 ? -40 : H + 40;
+    creatures.push(c);
+  }
+
+  snowArr.forEach(function(s) { s.update(phase); s.draw(ctx); });
+  creatures.sort(function(a, b) { return a.size - b.size; });
+  creatures.forEach(function(c) { c.update(phase); c.draw(ctx); });
+
+  requestAnimationFrame(animate);
+}
+
+ctx.fillStyle = '#00030c';
+ctx.fillRect(0, 0, W, H);
+setTimeout(function() { showLabel('I. THE DESCENT'); animate(); }, 300);
+</script>
+</body>
+</html>

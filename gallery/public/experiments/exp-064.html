@@ -1,0 +1,435 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=1280,height=720">
+<title>Chromatic Fugue Engine — exp-064</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/tone/14.8.49/Tone.js"></script>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+  width: 1280px; height: 720px; overflow: hidden;
+  background: #0a0a12;
+  font-family: 'Courier New', monospace;
+}
+canvas { display: block; position: absolute; top: 0; left: 0; }
+#title {
+  position: absolute; top: 18px; left: 50%; transform: translateX(-50%);
+  color: rgba(255,255,255,0.5); font-size: 13px; letter-spacing: 5px;
+  text-transform: uppercase; z-index: 20; pointer-events: none;
+}
+#voiceLabels {
+  position: absolute; right: 24px; top: 50%; transform: translateY(-50%);
+  z-index: 20; pointer-events: none;
+}
+.voice-label {
+  font-size: 11px; letter-spacing: 2px; margin: 28px 0;
+  opacity: 0; transition: opacity 1.5s ease-in;
+  text-transform: uppercase;
+}
+.voice-label.active { opacity: 0.8; }
+#start-btn {
+  position: absolute; top: 50%; left: 50%; transform: translate(-50%,-50%);
+  z-index: 30; background: none; border: 1px solid rgba(255,255,255,0.4);
+  color: rgba(255,255,255,0.8); padding: 16px 40px; font-size: 16px;
+  letter-spacing: 6px; cursor: pointer; font-family: 'Courier New', monospace;
+  text-transform: uppercase; transition: all 0.3s;
+}
+#start-btn:hover { border-color: #fff; color: #fff; }
+#info {
+  position: absolute; bottom: 16px; left: 50%; transform: translateX(-50%);
+  color: rgba(255,255,255,0.25); font-size: 10px; letter-spacing: 3px;
+  z-index: 20; pointer-events: none;
+}
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="title">Chromatic Fugue Engine</div>
+<div id="voiceLabels"></div>
+<div id="info"></div>
+<button id="start-btn">Begin Fugue</button>
+
+<script>
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d');
+canvas.width = 1280;
+canvas.height = 720;
+
+const BPM = 100;
+const QUARTER = 60 / BPM;
+
+// Fugue subject: D minor melody
+const subject = [
+  { note: 'D4',  dur: '8n' },
+  { note: 'A4',  dur: '8n' },
+  { note: 'F4',  dur: '8n' },
+  { note: 'D4',  dur: '16n' },
+  { note: 'E4',  dur: '16n' },
+  { note: 'F4',  dur: '8n' },
+  { note: 'G4',  dur: '4n' },
+  { note: 'A4',  dur: '8n' },
+  { note: 'Bb4', dur: '8n' },
+  { note: 'A4',  dur: '8n' },
+  { note: 'G4',  dur: '16n' },
+  { note: 'F4',  dur: '16n' },
+  { note: 'E4',  dur: '4n' },
+  { note: 'D4',  dur: '4n' },
+];
+
+// Counter-subject: contrasting melody
+const counterSubject = [
+  { note: 'F4',  dur: '4n' },
+  { note: 'E4',  dur: '8n' },
+  { note: 'D4',  dur: '8n' },
+  { note: 'C4',  dur: '8n' },
+  { note: 'D4',  dur: '8n' },
+  { note: 'E4',  dur: '4n' },
+  { note: 'F4',  dur: '8n' },
+  { note: 'G4',  dur: '8n' },
+  { note: 'A4',  dur: '4n' },
+  { note: 'G4',  dur: '8n' },
+  { note: 'F4',  dur: '8n' },
+  { note: 'E4',  dur: '8n' },
+  { note: 'D4',  dur: '8n' },
+  { note: 'A3',  dur: '4n' },
+];
+
+const voiceConfigs = [
+  { name: 'Dux',     color: '#ff3366', transpose: 12, wave: 'sine',     yCenter: 130, entryBeat: 0 },
+  { name: 'Comes',   color: '#ffaa22', transpose: 7,  wave: 'triangle', yCenter: 290, entryBeat: 14 },
+  { name: 'Alto',    color: '#33ddff', transpose: 0,  wave: 'square',   yCenter: 440, entryBeat: 28 },
+  { name: 'Basso',   color: '#cc44ff', transpose: -5, wave: 'sawtooth', yCenter: 580, entryBeat: 42 },
+];
+
+const noteNamesMap = { 'C':0,'D':2,'E':4,'F':5,'G':7,'A':9,'B':11 };
+function noteToMidi(n) {
+  const m = n.match(/^([A-G])(b|#)?(\d+)$/);
+  let v = (parseInt(m[3]) + 1) * 12 + noteNamesMap[m[1]];
+  if (m[2] === '#') v++; if (m[2] === 'b') v--;
+  return v;
+}
+function midiToNote(m) {
+  const n = ['C','C#','D','D#','E','F','F#','G','G#','A','A#','B'];
+  return n[m % 12] + (Math.floor(m / 12) - 1);
+}
+function midiToFreq(m) { return 440 * Math.pow(2, (m - 69) / 12); }
+function durToSec(d) {
+  const map = { '1n': QUARTER*4, '2n': QUARTER*2, '4n': QUARTER, '8n': QUARTER/2, '16n': QUARTER/4 };
+  return map[d] || QUARTER;
+}
+
+let voices = [];
+let started = false;
+let globalTime = 0;
+let currentBeat = -1;
+let lastTime = 0;
+
+class FugueVoice {
+  constructor(cfg, idx) {
+    this.cfg = cfg;
+    this.idx = idx;
+    this.active = false;
+    this.noteIdx = -1;
+    this.noteStart = 0;
+    this.noteDur = 0;
+    this.freq = 220;
+    this.phase = 0;
+    this.loopCount = 0;
+    this.useCounter = false;
+    this.trailLen = 1280;
+    this.trail = new Float32Array(this.trailLen);
+    this.writePos = 0;
+
+    this.subjectNotes = subject.map(n => ({ midi: noteToMidi(n.note) + cfg.transpose, dur: n.dur }));
+    this.counterNotes = counterSubject.map(n => ({ midi: noteToMidi(n.note) + cfg.transpose, dur: n.dur }));
+
+    this.synth = new Tone.Synth({
+      oscillator: { type: cfg.wave },
+      envelope: { attack: 0.04, decay: 0.15, sustain: 0.55, release: 0.4 },
+      volume: -16
+    });
+    this.filter = new Tone.Filter({ frequency: 1800 + idx * 400, type: 'lowpass', Q: 1 });
+    this.panner = new Tone.Panner((idx - 1.5) / 2.5);
+    this.synth.chain(this.filter, this.panner, Tone.Destination);
+
+    const label = document.createElement('div');
+    label.className = 'voice-label';
+    label.style.color = cfg.color;
+    label.textContent = cfg.name;
+    label.id = 'vlbl-' + idx;
+    document.getElementById('voiceLabels').appendChild(label);
+  }
+
+  getSeq() { return this.useCounter ? this.counterNotes : this.subjectNotes; }
+
+  enter() {
+    this.active = true;
+    this.noteIdx = 0;
+    this.noteStart = globalTime;
+    this.playNote();
+    document.getElementById('vlbl-' + this.idx).classList.add('active');
+  }
+
+  playNote() {
+    const seq = this.getSeq();
+    if (this.noteIdx >= seq.length) {
+      this.noteIdx = 0;
+      this.loopCount++;
+      this.useCounter = !this.useCounter;
+    }
+    const n = this.getSeq()[this.noteIdx];
+    this.freq = midiToFreq(n.midi);
+    this.noteDur = durToSec(n.dur);
+    try { this.synth.triggerAttackRelease(midiToNote(n.midi), this.noteDur * 0.85); } catch(e) {}
+  }
+
+  update(dt) {
+    if (!this.active) return;
+    const elapsed = globalTime - this.noteStart;
+    if (elapsed >= this.noteDur) {
+      this.noteStart = globalTime;
+      this.noteIdx++;
+      this.playNote();
+    }
+    const prog = elapsed / this.noteDur;
+    const env = prog < 0.1 ? prog / 0.1 : prog > 0.8 ? (1 - prog) / 0.2 : 1;
+    this.phase += this.freq * dt * Math.PI * 2;
+    let s = 0;
+    const p = this.phase;
+    switch (this.cfg.wave) {
+      case 'sine': s = Math.sin(p); break;
+      case 'triangle': s = (2/Math.PI)*Math.asin(Math.sin(p)); break;
+      case 'square': s = Math.sin(p) > 0 ? 0.65 : -0.65; break;
+      case 'sawtooth': s = (2*((p/(Math.PI*2))%1)-1)*0.65; break;
+    }
+    s += Math.sin(p*2)*0.12 + Math.sin(p*3)*0.06;
+    s *= env * 0.85;
+    this.trail[this.writePos] = s;
+    this.writePos = (this.writePos + 1) % this.trailLen;
+  }
+
+  draw() {
+    const y0 = this.cfg.yCenter;
+    const amp = 48;
+    if (!this.active) {
+      ctx.strokeStyle = this.cfg.color + '12';
+      ctx.lineWidth = 0.5;
+      ctx.beginPath(); ctx.moveTo(0, y0); ctx.lineTo(1280, y0); ctx.stroke();
+      return;
+    }
+    // Glow
+    ctx.save();
+    ctx.shadowColor = this.cfg.color;
+    ctx.shadowBlur = 20;
+    ctx.strokeStyle = this.cfg.color + '18';
+    ctx.lineWidth = 8;
+    ctx.beginPath();
+    for (let x = 0; x < 1280; x++) {
+      const i = (this.writePos + x) % this.trailLen;
+      const fade = x / 1280;
+      const y = y0 + this.trail[i] * amp * (0.3 + fade * 0.7);
+      if (x === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+    }
+    ctx.stroke(); ctx.restore();
+    // Main line
+    ctx.save();
+    ctx.shadowColor = this.cfg.color;
+    ctx.shadowBlur = 10;
+    ctx.strokeStyle = this.cfg.color;
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    for (let x = 0; x < 1280; x++) {
+      const i = (this.writePos + x) % this.trailLen;
+      const fade = x / 1280;
+      const y = y0 + this.trail[i] * amp * (0.3 + fade * 0.7);
+      if (x === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+    }
+    ctx.stroke(); ctx.restore();
+    // Playhead dot
+    const ti = (this.writePos - 1 + this.trailLen) % this.trailLen;
+    const ty = y0 + this.trail[ti] * amp;
+    ctx.fillStyle = '#fff';
+    ctx.shadowColor = this.cfg.color;
+    ctx.shadowBlur = 15;
+    ctx.beginPath(); ctx.arc(1279, ty, 4, 0, Math.PI*2); ctx.fill();
+    ctx.shadowBlur = 0;
+    // Note label
+    const seq = this.getSeq();
+    if (this.noteIdx >= 0 && this.noteIdx < seq.length) {
+      ctx.fillStyle = this.cfg.color + 'bb';
+      ctx.font = '9px Courier New';
+      ctx.fillText(midiToNote(seq[this.noteIdx].midi), 1240, ty - 10);
+    }
+  }
+}
+
+function drawCounterpoint() {
+  const active = voices.filter(v => v.active);
+  if (active.length < 2) return;
+  for (let i = 0; i < active.length - 1; i++) {
+    const v1 = active[i], v2 = active[i+1];
+    const ti1 = (v1.writePos-1+v1.trailLen)%v1.trailLen;
+    const ti2 = (v2.writePos-1+v2.trailLen)%v2.trailLen;
+    const y1 = v1.cfg.yCenter + v1.trail[ti1]*48;
+    const y2 = v2.cfg.yCenter + v2.trail[ti2]*48;
+    const g = ctx.createLinearGradient(1270,y1,1270,y2);
+    g.addColorStop(0, v1.cfg.color+'25');
+    g.addColorStop(1, v2.cfg.color+'25');
+    ctx.strokeStyle = g; ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(1270,y1); ctx.lineTo(1270,y2); ctx.stroke();
+  }
+  ctx.globalAlpha = 0.025;
+  for (let x = 100; x < 1280; x += 80) {
+    for (let i = 0; i < active.length - 1; i++) {
+      const v1 = active[i], v2 = active[i+1];
+      const fade = x / 1280;
+      const y1 = v1.cfg.yCenter + v1.trail[(v1.writePos+x)%v1.trailLen]*48*(0.3+fade*0.7);
+      const y2 = v2.cfg.yCenter + v2.trail[(v2.writePos+x)%v2.trailLen]*48*(0.3+fade*0.7);
+      ctx.strokeStyle = v1.cfg.color; ctx.lineWidth = 0.5;
+      ctx.beginPath(); ctx.moveTo(x,y1); ctx.lineTo(x,y2); ctx.stroke();
+    }
+  }
+  ctx.globalAlpha = 1;
+}
+
+function drawGrid() {
+  ctx.strokeStyle = 'rgba(255,255,255,0.025)';
+  ctx.lineWidth = 0.5;
+  for (const vc of voiceConfigs) {
+    ctx.beginPath(); ctx.moveTo(0, vc.yCenter); ctx.lineTo(1280, vc.yCenter); ctx.stroke();
+  }
+}
+
+function animate(ts) {
+  if (!started) return;
+  const now = ts / 1000;
+  const dt = lastTime ? Math.min(now - lastTime, 0.05) : 0.016;
+  lastTime = now;
+  globalTime += dt;
+  const nb = Math.floor(globalTime / QUARTER);
+  if (nb !== currentBeat) {
+    currentBeat = nb;
+    for (const v of voices) if (!v.active && currentBeat >= v.cfg.entryBeat) v.enter();
+    const ac = voices.filter(v => v.active).length;
+    document.getElementById('info').textContent =
+      'measure ' + (Math.floor(currentBeat/4)+1) + '  |  beat ' + ((currentBeat%4)+1) + '  |  ' + ac + ' voice' + (ac!==1?'s':'');
+  }
+  ctx.fillStyle = 'rgba(10, 10, 18, 0.18)';
+  ctx.fillRect(0, 0, 1280, 720);
+  drawGrid();
+  for (const v of voices) v.update(dt);
+  drawCounterpoint();
+  for (const v of voices) v.draw();
+  requestAnimationFrame(animate);
+}
+
+document.getElementById('start-btn').addEventListener('click', async () => {
+  document.getElementById('start-btn').style.display = 'none';
+  await Tone.start();
+  Tone.Transport.bpm.value = BPM;
+  voices = voiceConfigs.map((vc, i) => new FugueVoice(vc, i));
+  started = true; globalTime = 0; currentBeat = -1; lastTime = 0;
+  requestAnimationFrame(animate);
+});
+
+// Auto-start for screenshots (visual only, no audio)
+setTimeout(() => {
+  if (started) return;
+  document.getElementById('start-btn').style.display = 'none';
+
+  voices = voiceConfigs.map((vc, i) => {
+    const v = {
+      cfg: vc, idx: i, active: true, noteIdx: 0, noteStart: 0, noteDur: QUARTER,
+      freq: midiToFreq(noteToMidi(subject[0].note) + vc.transpose),
+      phase: i * 1.7, loopCount: 0, useCounter: i % 2 === 1,
+      trailLen: 1280, trail: new Float32Array(1280), writePos: 0,
+      subjectNotes: subject.map(n => ({ midi: noteToMidi(n.note) + vc.transpose, dur: n.dur })),
+      counterNotes: counterSubject.map(n => ({ midi: noteToMidi(n.note) + vc.transpose, dur: n.dur })),
+      getSeq() { return this.useCounter ? this.counterNotes : this.subjectNotes; },
+      update(dt) {
+        const el = globalTime - this.noteStart;
+        if (el >= this.noteDur) {
+          this.noteStart = globalTime;
+          this.noteIdx = (this.noteIdx + 1) % this.getSeq().length;
+          if (this.noteIdx === 0) { this.loopCount++; this.useCounter = !this.useCounter; }
+          const n = this.getSeq()[this.noteIdx];
+          this.freq = midiToFreq(n.midi);
+          this.noteDur = durToSec(n.dur);
+        }
+        const pr = Math.max(0, Math.min(1, el / this.noteDur));
+        const env = pr<0.1?pr/0.1:pr>0.8?(1-pr)/0.2:1;
+        this.phase += this.freq * dt * Math.PI * 2;
+        let s = 0; const p = this.phase;
+        switch(vc.wave) {
+          case 'sine': s=Math.sin(p); break;
+          case 'triangle': s=(2/Math.PI)*Math.asin(Math.sin(p)); break;
+          case 'square': s=Math.sin(p)>0?0.65:-0.65; break;
+          case 'sawtooth': s=(2*((p/(Math.PI*2))%1)-1)*0.65; break;
+        }
+        s += Math.sin(p*2)*0.12 + Math.sin(p*3)*0.06;
+        s *= env * 0.85;
+        this.trail[this.writePos] = s;
+        this.writePos = (this.writePos + 1) % this.trailLen;
+      },
+      draw() {
+        const y0 = vc.yCenter; const ampS = 48;
+        ctx.save(); ctx.shadowColor = vc.color; ctx.shadowBlur = 20;
+        ctx.strokeStyle = vc.color + '18'; ctx.lineWidth = 8; ctx.beginPath();
+        for (let x=0;x<1280;x++) {
+          const ii=(this.writePos+x)%this.trailLen; const fade=x/1280;
+          const y=y0+this.trail[ii]*ampS*(0.3+fade*0.7);
+          if(x===0)ctx.moveTo(x,y);else ctx.lineTo(x,y);
+        }
+        ctx.stroke(); ctx.restore();
+        ctx.save(); ctx.shadowColor = vc.color; ctx.shadowBlur = 10;
+        ctx.strokeStyle = vc.color; ctx.lineWidth = 2; ctx.beginPath();
+        for (let x=0;x<1280;x++) {
+          const ii=(this.writePos+x)%this.trailLen; const fade=x/1280;
+          const y=y0+this.trail[ii]*ampS*(0.3+fade*0.7);
+          if(x===0)ctx.moveTo(x,y);else ctx.lineTo(x,y);
+        }
+        ctx.stroke(); ctx.restore();
+        const ti=(this.writePos-1+this.trailLen)%this.trailLen;
+        const ty=y0+this.trail[ti]*ampS;
+        ctx.fillStyle='#fff'; ctx.beginPath(); ctx.arc(1279,ty,4,0,Math.PI*2); ctx.fill();
+      }
+    };
+    const label = document.createElement('div');
+    label.className = 'voice-label active';
+    label.style.color = vc.color;
+    label.textContent = vc.name;
+    document.getElementById('voiceLabels').appendChild(label);
+    return v;
+  });
+
+  started = true; globalTime = 0; currentBeat = 0;
+  // Simulate enough frames to fill all 1280 pixels of trail
+  for (let t = 0; t < 1400; t++) { globalTime = t * 0.016; for (const v of voices) v.update(0.016); }
+  globalTime = 22.0; currentBeat = Math.floor(globalTime / QUARTER);
+  document.getElementById('info').textContent =
+    'measure ' + (Math.floor(currentBeat/4)+1) + '  |  beat ' + ((currentBeat%4)+1) + '  |  4 voices';
+
+  ctx.fillStyle = '#0a0a12';
+  ctx.fillRect(0, 0, 1280, 720);
+  drawGrid();
+  const act = voices;
+  ctx.globalAlpha = 0.025;
+  for (let x=100;x<1280;x+=80) {
+    for (let i=0;i<act.length-1;i++) {
+      const v1=act[i],v2=act[i+1];
+      const fade=x/1280;
+      const y1=v1.cfg.yCenter+v1.trail[(v1.writePos+x)%v1.trailLen]*48*(0.3+fade*0.7);
+      const y2=v2.cfg.yCenter+v2.trail[(v2.writePos+x)%v2.trailLen]*48*(0.3+fade*0.7);
+      ctx.strokeStyle=v1.cfg.color; ctx.lineWidth=0.5;
+      ctx.beginPath();ctx.moveTo(x,y1);ctx.lineTo(x,y2);ctx.stroke();
+    }
+  }
+  ctx.globalAlpha = 1;
+  for (const v of voices) v.draw();
+  lastTime = performance.now() / 1000;
+  requestAnimationFrame(animate);
+}, 400);
+</script>
+</body>
+</html>

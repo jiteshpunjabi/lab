@@ -1,0 +1,307 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=1280,height=720">
+<title>exp-058 — Chladni Figures</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { background: #08080f; overflow: hidden; width: 1280px; height: 720px; font-family: 'Georgia', serif; }
+canvas { display: block; position: absolute; top: 0; left: 0; }
+#info {
+  position: absolute; bottom: 16px; left: 50%; transform: translateX(-50%);
+  color: rgba(220, 200, 160, 0.55); font-size: 12px; text-align: center;
+  pointer-events: none; text-shadow: 0 0 8px rgba(0,0,0,0.8);
+  letter-spacing: 1px;
+}
+#freq-display {
+  position: absolute; top: 20px; right: 30px;
+  color: rgba(255, 220, 120, 0.85); font-size: 18px; font-family: 'Courier New', monospace;
+  pointer-events: none; text-shadow: 0 0 12px rgba(255, 180, 50, 0.3);
+}
+#mode-display {
+  position: absolute; top: 48px; right: 30px;
+  color: rgba(180, 200, 255, 0.6); font-size: 13px; font-family: 'Courier New', monospace;
+  pointer-events: none;
+}
+</style>
+</head>
+<body>
+<canvas id="plate"></canvas>
+<div id="freq-display"></div>
+<div id="mode-display"></div>
+<div id="info">CLICK &amp; DRAG TO BOW THE PLATE &mdash; horizontal = frequency &bull; vertical = amplitude</div>
+<script>
+const canvas = document.getElementById('plate');
+const ctx = canvas.getContext('2d');
+const W = 1280, H = 720;
+canvas.width = W; canvas.height = H;
+
+const freqDisplay = document.getElementById('freq-display');
+const modeDisplay = document.getElementById('mode-display');
+
+const plateSize = 540;
+const plateX = (W - plateSize) / 2;
+const plateY = (H - plateSize) / 2 - 10;
+
+const NUM_PARTICLES = 18000;
+const particles = [];
+
+let m = 2, n = 3;
+let frequency = 440;
+let amplitude = 0;
+let targetAmplitude = 0;
+let isDragging = false;
+
+function chladni(x, y, a, b) {
+  return Math.cos(a * Math.PI * x) * Math.cos(b * Math.PI * y)
+       - Math.cos(b * Math.PI * x) * Math.cos(a * Math.PI * y);
+}
+
+for (let i = 0; i < NUM_PARTICLES; i++) {
+  particles.push({
+    x: Math.random() * plateSize + plateX,
+    y: Math.random() * plateSize + plateY,
+    vx: 0, vy: 0,
+    size: 1.0 + Math.random() * 1.2,
+    brightness: 0.7 + Math.random() * 0.3
+  });
+}
+
+const modes = [
+  [1, 2], [2, 3], [3, 4], [4, 5], [2, 5], [3, 7], [5, 6],
+  [1, 4], [3, 5], [4, 7], [5, 8], [6, 7], [2, 7], [1, 6],
+  [3, 8], [4, 9], [5, 9], [7, 8]
+];
+
+function getModeFromFreq(freq) {
+  const idx = Math.floor(((freq - 100) / 900) * modes.length);
+  return modes[Math.max(0, Math.min(modes.length - 1, idx))];
+}
+
+canvas.addEventListener('mousedown', () => { isDragging = true; autoPlay = false; });
+canvas.addEventListener('mousemove', (e) => {
+  if (isDragging) {
+    frequency = 100 + (e.clientX / W) * 900;
+    targetAmplitude = (1.0 - (e.clientY / H)) * 0.6;
+    targetAmplitude = Math.max(0.05, Math.min(0.6, targetAmplitude));
+    const mode = getModeFromFreq(frequency);
+    m = mode[0]; n = mode[1];
+  }
+});
+canvas.addEventListener('mouseup', () => { isDragging = false; targetAmplitude = 0; });
+canvas.addEventListener('mouseleave', () => { isDragging = false; targetAmplitude = 0; });
+
+let autoPlay = true;
+let autoTime = 0.15;
+
+const bgCanvas = document.createElement('canvas');
+bgCanvas.width = plateSize; bgCanvas.height = plateSize;
+const bgCtx = bgCanvas.getContext('2d');
+
+function drawPlatePattern(a, b, amp) {
+  if (amp < 0.01) return;
+  const imgData = bgCtx.createImageData(plateSize, plateSize);
+  const data = imgData.data;
+  const step = 3;
+  for (let py = 0; py < plateSize; py += step) {
+    for (let px = 0; px < plateSize; px += step) {
+      const nx = (px / plateSize) * 2 - 1;
+      const ny = (py / plateSize) * 2 - 1;
+      const val = chladni(nx, ny, a, b);
+      const absVal = Math.abs(val);
+      const intensity = absVal * Math.min(0.3, amp * 0.5);
+
+      let r, g, bl;
+      if (val > 0) { r = 80; g = 45; bl = 15; }
+      else { r = 20; g = 40; bl = 80; }
+
+      for (let dy = 0; dy < step && py + dy < plateSize; dy++) {
+        for (let dx = 0; dx < step && px + dx < plateSize; dx++) {
+          const i2 = ((py + dy) * plateSize + (px + dx)) * 4;
+          data[i2] = r * intensity * 3.5;
+          data[i2+1] = g * intensity * 3.5;
+          data[i2+2] = bl * intensity * 3.5;
+          data[i2+3] = intensity * 280;
+        }
+      }
+    }
+  }
+  bgCtx.putImageData(imgData, 0, 0);
+}
+
+function update() {
+  if (!isDragging && autoPlay) {
+    autoTime += 0.006;
+    const cycle = autoTime % 1;
+    const modeIdx = Math.floor(autoTime) % modes.length;
+    m = modes[modeIdx][0];
+    n = modes[modeIdx][1];
+
+    if (cycle < 0.1) targetAmplitude = (cycle / 0.1) * 0.5;
+    else if (cycle > 0.85) targetAmplitude = ((1 - cycle) / 0.15) * 0.5;
+    else targetAmplitude = 0.5;
+
+    frequency = 100 + (modeIdx / modes.length) * 900;
+  }
+
+  amplitude += (targetAmplitude - amplitude) * 0.08;
+
+  for (let i = 0; i < NUM_PARTICLES; i++) {
+    const p = particles[i];
+    const nx = ((p.x - plateX) / plateSize) * 2 - 1;
+    const ny = ((p.y - plateY) / plateSize) * 2 - 1;
+
+    if (nx < -1 || nx > 1 || ny < -1 || ny > 1) {
+      p.x = Math.random() * plateSize + plateX;
+      p.y = Math.random() * plateSize + plateY;
+      p.vx = 0; p.vy = 0;
+      continue;
+    }
+
+    const val = chladni(nx, ny, m, n);
+    const eps = 0.012;
+    const dx = chladni(nx + eps, ny, m, n) - chladni(nx - eps, ny, m, n);
+    const dy = chladni(nx, ny + eps, m, n) - chladni(nx, ny - eps, m, n);
+
+    const gradMag = Math.sqrt(dx * dx + dy * dy) + 0.001;
+    const sign = val > 0 ? 1 : -1;
+    const force = amplitude * 3.2;
+
+    p.vx += -sign * (dx / gradMag) * force * 0.5;
+    p.vy += -sign * (dy / gradMag) * force * 0.5;
+
+    const jitter = Math.abs(val) * amplitude * 2.2;
+    p.vx += (Math.random() - 0.5) * jitter;
+    p.vy += (Math.random() - 0.5) * jitter;
+
+    p.vx *= 0.90;
+    p.vy *= 0.90;
+    p.x += p.vx;
+    p.y += p.vy;
+
+    if (p.x < plateX) { p.x = plateX; p.vx *= -0.5; }
+    if (p.x > plateX + plateSize) { p.x = plateX + plateSize; p.vx *= -0.5; }
+    if (p.y < plateY) { p.y = plateY; p.vy *= -0.5; }
+    if (p.y > plateY + plateSize) { p.y = plateY + plateSize; p.vy *= -0.5; }
+  }
+}
+
+function draw() {
+  ctx.fillStyle = '#08080f';
+  ctx.fillRect(0, 0, W, H);
+
+  // Plate background
+  const pg = ctx.createRadialGradient(
+    plateX + plateSize/2, plateY + plateSize/2, 0,
+    plateX + plateSize/2, plateY + plateSize/2, plateSize * 0.7
+  );
+  pg.addColorStop(0, '#151520');
+  pg.addColorStop(1, '#0c0c16');
+  ctx.fillStyle = pg;
+  ctx.fillRect(plateX, plateY, plateSize, plateSize);
+
+  // Vibration pattern overlay
+  drawPlatePattern(m, n, amplitude);
+  if (amplitude > 0.01) {
+    ctx.globalAlpha = 0.7;
+    ctx.drawImage(bgCanvas, plateX, plateY);
+    ctx.globalAlpha = 1.0;
+  }
+
+  // Plate border
+  ctx.strokeStyle = `rgba(130, 150, 200, ${0.25 + amplitude * 0.5})`;
+  ctx.lineWidth = 1.5;
+  ctx.strokeRect(plateX, plateY, plateSize, plateSize);
+
+  // Corner brackets
+  const bLen = 20;
+  ctx.strokeStyle = `rgba(180, 160, 120, ${0.3 + amplitude * 0.3})`;
+  ctx.lineWidth = 1;
+  [[plateX, plateY, 1, 1], [plateX + plateSize, plateY, -1, 1],
+   [plateX, plateY + plateSize, 1, -1], [plateX + plateSize, plateY + plateSize, -1, -1]
+  ].forEach(([x, y, sx, sy]) => {
+    ctx.beginPath();
+    ctx.moveTo(x + sx * bLen, y); ctx.lineTo(x, y); ctx.lineTo(x, y + sy * bLen);
+    ctx.stroke();
+  });
+
+  // Draw sand via pixel buffer
+  const pxBuf = ctx.getImageData(0, 0, W, H);
+  const pxData = pxBuf.data;
+
+  for (let i = 0; i < NUM_PARTICLES; i++) {
+    const p = particles[i];
+    const px = Math.round(p.x);
+    const py = Math.round(p.y);
+    if (px < 0 || px >= W || py < 0 || py >= H) continue;
+
+    const nx = ((p.x - plateX) / plateSize) * 2 - 1;
+    const ny = ((p.y - plateY) / plateSize) * 2 - 1;
+    const val = Math.abs(chladni(nx, ny, m, n));
+    const onNode = 1 - Math.min(1, val * 3);
+    const speed = Math.sqrt(p.vx * p.vx + p.vy * p.vy);
+
+    // Sand: bright gold on nodal lines, dimmer warm amber elsewhere
+    const r = 200 + onNode * 55;
+    const g = 170 + onNode * 75;
+    const b = 70 + onNode * 140;
+    const a = (0.4 + onNode * 0.55 + speed * 0.04) * p.brightness;
+
+    const idx = (py * W + px) * 4;
+    const alpha = Math.min(1, a);
+    pxData[idx]   = Math.min(255, pxData[idx] + r * alpha);
+    pxData[idx+1] = Math.min(255, pxData[idx+1] + g * alpha);
+    pxData[idx+2] = Math.min(255, pxData[idx+2] + b * alpha);
+    pxData[idx+3] = 255;
+
+    // Larger particles get extra pixels
+    if (p.size > 1.2) {
+      if (px + 1 < W) {
+        const i2 = idx + 4;
+        pxData[i2]   = Math.min(255, pxData[i2] + r * alpha * 0.7);
+        pxData[i2+1] = Math.min(255, pxData[i2+1] + g * alpha * 0.7);
+        pxData[i2+2] = Math.min(255, pxData[i2+2] + b * alpha * 0.7);
+        pxData[i2+3] = 255;
+      }
+      if (py + 1 < H) {
+        const i3 = idx + W * 4;
+        pxData[i3]   = Math.min(255, pxData[i3] + r * alpha * 0.5);
+        pxData[i3+1] = Math.min(255, pxData[i3+1] + g * alpha * 0.5);
+        pxData[i3+2] = Math.min(255, pxData[i3+2] + b * alpha * 0.5);
+        pxData[i3+3] = 255;
+      }
+    }
+  }
+  ctx.putImageData(pxBuf, 0, 0);
+
+  // Edge glow when vibrating
+  if (amplitude > 0.03) {
+    ctx.shadowBlur = 30;
+    ctx.shadowColor = `rgba(255, 170, 40, ${amplitude * 0.5})`;
+    ctx.strokeStyle = `rgba(255, 190, 70, ${amplitude * 0.35})`;
+    ctx.lineWidth = 1;
+    ctx.strokeRect(plateX, plateY, plateSize, plateSize);
+    ctx.shadowBlur = 0;
+  }
+
+  freqDisplay.textContent = Math.round(frequency) + ' Hz';
+  modeDisplay.textContent = 'mode (' + m + ', ' + n + ')';
+
+  ctx.fillStyle = 'rgba(200, 180, 140, 0.5)';
+  ctx.font = '15px Georgia';
+  ctx.fillText('Chladni Figures', 30, 34);
+  ctx.fillStyle = 'rgba(160, 150, 130, 0.35)';
+  ctx.font = '11px Georgia';
+  ctx.fillText('Sand on a vibrating plate', 30, 52);
+}
+
+function animate() {
+  update();
+  draw();
+  requestAnimationFrame(animate);
+}
+animate();
+</script>
+</body>
+</html>

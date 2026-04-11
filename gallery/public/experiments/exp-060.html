@@ -1,0 +1,291 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=1280,height=720">
+<title>Tidal Music Box</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    width: 1280px; height: 720px; overflow: hidden;
+    background: linear-gradient(180deg, #0a0e27 0%, #0d1b3e 40%, #0f2847 70%, #1a3a5c 100%);
+    font-family: Georgia, serif;
+  }
+  .title {
+    position: absolute; top: 18px; left: 50%; transform: translateX(-50%);
+    color: rgba(180, 210, 240, 0.5); font-size: 14px; letter-spacing: 6px;
+    text-transform: uppercase; z-index: 100;
+  }
+  .cylinder {
+    position: absolute; bottom: 80px; left: 50%; transform: translateX(-50%);
+    width: 700px; height: 120px; border-radius: 60px;
+    background: linear-gradient(180deg, #c9a84c 0%, #8b6914 30%, #6b4f10 50%, #8b6914 70%, #c9a84c 100%);
+    box-shadow: 0 0 30px rgba(201,168,76,0.3), inset 0 -2px 8px rgba(0,0,0,0.4), inset 0 2px 8px rgba(255,255,255,0.2);
+    z-index: 10;
+  }
+  .peg-row {
+    position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+    display: flex; align-items: center; justify-content: space-around; padding: 0 30px;
+  }
+  .peg {
+    width: 6px; height: 6px; border-radius: 50%; background: #ffd700;
+    box-shadow: 0 0 4px #ffd700, 0 0 8px rgba(255,215,0,0.5);
+    animation: pegPulse 2s ease-in-out infinite;
+  }
+  .peg:nth-child(odd) { animation-delay: -0.5s; }
+  .peg:nth-child(3n) { animation-delay: -1.2s; }
+  .peg:nth-child(4n+1) { animation-delay: -1.8s; }
+  @keyframes pegPulse {
+    0%, 100% { transform: scale(1); opacity: 0.7; }
+    50% { transform: scale(1.6); opacity: 1; box-shadow: 0 0 8px #ffd700, 0 0 16px rgba(255,215,0,0.8); }
+  }
+  .tine-rack {
+    position: absolute; bottom: 140px; left: 50%; transform: translateX(-50%);
+    width: 720px; height: 60px; display: flex; align-items: flex-end;
+    justify-content: space-around; padding: 0 20px; z-index: 11;
+  }
+  .tine {
+    width: 3px; height: 45px;
+    background: linear-gradient(to top, #f0f0f0, #c0c0c0);
+    border-radius: 1px; transform-origin: bottom center;
+    animation: tineVibrate var(--dur) ease-in-out infinite;
+    animation-delay: var(--delay);
+    box-shadow: 0 0 6px rgba(255,255,255,0.5), 0 0 2px rgba(200,230,255,0.4);
+  }
+  @keyframes tineVibrate {
+    0%, 100% { transform: rotate(0deg); }
+    15% { transform: rotate(4deg); }
+    30% { transform: rotate(-3deg); }
+    45% { transform: rotate(2deg); }
+    60% { transform: rotate(-1deg); }
+    75% { transform: rotate(0.5deg); }
+  }
+  .wave {
+    position: absolute; width: 200%; left: -50%;
+    height: var(--h); bottom: var(--bottom); opacity: var(--opacity);
+    border-radius: 50% 50% 0 0 / 100% 100% 0 0;
+    animation: waveSlide var(--speed) ease-in-out infinite alternate;
+    animation-delay: var(--delay);
+  }
+  @keyframes waveSlide {
+    0% { transform: translateX(-5%) scaleY(0.8); }
+    100% { transform: translateX(5%) scaleY(1.2); }
+  }
+  .wave-1 { --h:280px; --bottom:160px; --speed:7s; --delay:0s; --opacity:0.45;
+    background: radial-gradient(ellipse at 30% 80%, #00bfff, transparent 70%), radial-gradient(ellipse at 70% 60%, #0077be, transparent 60%); }
+  .wave-2 { --h:240px; --bottom:170px; --speed:5s; --delay:-1s; --opacity:0.5;
+    background: radial-gradient(ellipse at 50% 90%, #00e5ff, transparent 65%), radial-gradient(ellipse at 20% 70%, #0099cc, transparent 55%); }
+  .wave-3 { --h:200px; --bottom:175px; --speed:9s; --delay:-3s; --opacity:0.35;
+    background: radial-gradient(ellipse at 60% 80%, #4dd0e1, transparent 60%), radial-gradient(ellipse at 80% 60%, #006064, transparent 50%); }
+  .wave-4 { --h:160px; --bottom:185px; --speed:6s; --delay:-2s; --opacity:0.55;
+    background: radial-gradient(ellipse at 40% 85%, #00acc1, transparent 70%); }
+  .wave-5 { --h:320px; --bottom:150px; --speed:11s; --delay:-4s; --opacity:0.25;
+    background: radial-gradient(ellipse at 35% 70%, #7c4dff, transparent 55%), radial-gradient(ellipse at 65% 50%, #304ffe, transparent 50%); }
+  .ripple-field {
+    position: absolute; bottom: 200px; left: 0; width: 100%; height: 400px; z-index: 6;
+  }
+  .ripple {
+    position: absolute; border-radius: 50%;
+    border: 2px solid rgba(100, 220, 255, 0.5);
+    animation: rippleExpand var(--dur) ease-out infinite;
+    animation-delay: var(--delay); left: var(--x); bottom: 0;
+    width: 10px; height: 10px; transform: translate(-50%, 50%);
+    box-shadow: 0 0 8px rgba(100, 220, 255, 0.3);
+  }
+  @keyframes rippleExpand {
+    0% { width: 10px; height: 10px; opacity: 0.8; border-color: rgba(100,220,255,0.8); box-shadow: 0 0 12px rgba(100,220,255,0.5); }
+    100% { width: 400px; height: 200px; opacity: 0; border-color: rgba(100,220,255,0); box-shadow: 0 0 0 transparent; }
+  }
+  .foam-layer {
+    position: absolute; bottom: 190px; left: 0; width: 100%; height: 30px; z-index: 7; overflow: hidden;
+  }
+  .foam-dot {
+    position: absolute; width: var(--size); height: var(--size); border-radius: 50%;
+    background: rgba(255,255,255,var(--alpha));
+    animation: foamFloat var(--dur) ease-in-out infinite;
+    animation-delay: var(--delay); left: var(--x); bottom: var(--y);
+  }
+  @keyframes foamFloat {
+    0%, 100% { transform: translateY(0) scale(1); opacity: var(--alpha); }
+    50% { transform: translateY(-8px) scale(1.3); opacity: calc(var(--alpha) * 1.5); }
+  }
+  .moon {
+    position: absolute; top: 60px; right: 180px; width: 70px; height: 70px;
+    border-radius: 50%; background: radial-gradient(circle at 35% 35%, #fff8e7, #e8d5a0);
+    box-shadow: 0 0 40px rgba(255,248,231,0.4), 0 0 80px rgba(255,248,231,0.2), 0 0 120px rgba(255,248,231,0.1);
+    z-index: 3; animation: moonGlow 8s ease-in-out infinite alternate;
+  }
+  .moon::after {
+    content: ''; position: absolute; top: 12px; left: 18px; width: 12px; height: 12px;
+    border-radius: 50%; background: rgba(200,180,140,0.3);
+    box-shadow: 22px 8px 0 4px rgba(200,180,140,0.2), 8px 28px 0 2px rgba(200,180,140,0.15);
+  }
+  @keyframes moonGlow {
+    0% { box-shadow: 0 0 40px rgba(255,248,231,0.3), 0 0 80px rgba(255,248,231,0.15); }
+    100% { box-shadow: 0 0 60px rgba(255,248,231,0.5), 0 0 120px rgba(255,248,231,0.25); }
+  }
+  .moon-reflection {
+    position: absolute; bottom: 200px; right: 180px; width: 8px; height: 200px; z-index: 8;
+    background: linear-gradient(to bottom, rgba(255,248,231,0.3), rgba(255,248,231,0.15) 30%, rgba(255,248,231,0.05) 60%, transparent);
+    filter: blur(3px); animation: reflectionShimmer 4s ease-in-out infinite alternate;
+  }
+  @keyframes reflectionShimmer {
+    0% { transform: scaleX(1) scaleY(1); opacity: 0.6; }
+    50% { transform: scaleX(2.5) scaleY(0.95); opacity: 0.8; }
+    100% { transform: scaleX(0.8) scaleY(1.05); opacity: 0.5; }
+  }
+  .star {
+    position: absolute; width: var(--size); height: var(--size); border-radius: 50%;
+    background: white; animation: starTwinkle var(--dur) ease-in-out infinite;
+    animation-delay: var(--delay); top: var(--top); left: var(--left); opacity: var(--alpha);
+  }
+  @keyframes starTwinkle {
+    0%, 100% { opacity: var(--alpha); transform: scale(1); }
+    50% { opacity: calc(var(--alpha) * 0.3); transform: scale(0.6); }
+  }
+  .note-particle {
+    position: absolute; width: 8px; height: 8px; border-radius: 50%;
+    background: var(--color); box-shadow: 0 0 12px var(--color), 0 0 24px var(--color);
+    animation: noteRise var(--dur) ease-out infinite;
+    animation-delay: var(--delay); left: var(--x); bottom: 200px; z-index: 12;
+  }
+  @keyframes noteRise {
+    0% { transform: translateY(0) scale(1); opacity: 1; }
+    30% { opacity: 1; transform: translateY(-75px) scale(1.2); }
+    100% { transform: translateY(-300px) translateX(var(--drift)) scale(0.3); opacity: 0; }
+  }
+  .horizon-glow {
+    position: absolute; bottom: 180px; left: 0; width: 100%; height: 60px;
+    background: linear-gradient(to top, rgba(0,180,240,0.4), rgba(0,100,180,0.1), transparent); z-index: 4;
+  }
+  .water-surface {
+    position: absolute; bottom: 195px; left: 0; width: 100%; height: 3px;
+    background: linear-gradient(90deg, transparent 5%, rgba(100,220,255,0.3) 20%, rgba(100,220,255,0.5) 50%, rgba(100,220,255,0.3) 80%, transparent 95%);
+    z-index: 8; animation: surfaceShimmer 3s ease-in-out infinite alternate;
+  }
+  @keyframes surfaceShimmer {
+    0% { opacity: 0.4; }
+    100% { opacity: 0.8; }
+  }
+  .cylinder-base {
+    position: absolute; bottom: 20px; left: 50%; transform: translateX(-50%);
+    width: 740px; height: 70px;
+    background: linear-gradient(180deg, #2a1f0a 0%, #1a1205 60%, #0d0a03 100%);
+    border-radius: 8px; z-index: 9; box-shadow: 0 4px 20px rgba(0,0,0,0.6);
+  }
+  .end-cap {
+    position: absolute; bottom: 80px; width: 30px; height: 120px; border-radius: 50%;
+    background: linear-gradient(180deg, #d4af37, #8b6914, #d4af37);
+    box-shadow: inset 0 0 10px rgba(0,0,0,0.3); z-index: 11;
+  }
+  .end-cap.left { left: calc(50% - 365px); }
+  .end-cap.right { right: calc(50% - 365px); }
+  .comb-frame {
+    position: absolute; bottom: 137px; left: 50%; transform: translateX(-50%);
+    width: 730px; height: 6px; background: linear-gradient(90deg, #888, #ccc, #888);
+    border-radius: 3px; z-index: 12; box-shadow: 0 2px 4px rgba(0,0,0,0.3);
+  }
+</style>
+</head>
+<body>
+<div class="title">Tidal Music Box</div>
+<div class="stars" style="position:absolute;top:0;left:0;width:100%;height:300px;z-index:2">
+  <div class="star" style="--size:2px;--dur:3s;--delay:0s;--top:30px;--left:80px;--alpha:0.7"></div>
+  <div class="star" style="--size:1px;--dur:4s;--delay:-1s;--top:60px;--left:200px;--alpha:0.5"></div>
+  <div class="star" style="--size:2px;--dur:2.5s;--delay:-0.5s;--top:25px;--left:350px;--alpha:0.8"></div>
+  <div class="star" style="--size:1px;--dur:5s;--delay:-2s;--top:90px;--left:500px;--alpha:0.4"></div>
+  <div class="star" style="--size:3px;--dur:3.5s;--delay:-1.5s;--top:15px;--left:620px;--alpha:0.6"></div>
+  <div class="star" style="--size:1px;--dur:4.5s;--delay:-3s;--top:70px;--left:750px;--alpha:0.5"></div>
+  <div class="star" style="--size:2px;--dur:3s;--delay:-0.8s;--top:45px;--left:900px;--alpha:0.7"></div>
+  <div class="star" style="--size:1px;--dur:6s;--delay:-2.5s;--top:110px;--left:1050px;--alpha:0.3"></div>
+  <div class="star" style="--size:2px;--dur:3.2s;--delay:-1.2s;--top:55px;--left:1150px;--alpha:0.6"></div>
+  <div class="star" style="--size:1px;--dur:4s;--delay:-0.3s;--top:85px;--left:150px;--alpha:0.4"></div>
+  <div class="star" style="--size:2px;--dur:5s;--delay:-3.5s;--top:40px;--left:430px;--alpha:0.5"></div>
+  <div class="star" style="--size:1px;--dur:3.8s;--delay:-2.2s;--top:20px;--left:980px;--alpha:0.6"></div>
+</div>
+<div class="moon"></div>
+<div class="moon-reflection"></div>
+<div class="wave wave-5"></div>
+<div class="wave wave-1"></div>
+<div class="wave wave-3"></div>
+<div class="wave wave-2"></div>
+<div class="wave wave-4"></div>
+<div class="horizon-glow"></div>
+<div class="water-surface"></div>
+<div class="ripple-field">
+  <div class="ripple" style="--dur:4s;--delay:0s;--x:20%"></div>
+  <div class="ripple" style="--dur:5s;--delay:-1s;--x:35%"></div>
+  <div class="ripple" style="--dur:3.5s;--delay:-2s;--x:50%"></div>
+  <div class="ripple" style="--dur:4.5s;--delay:-0.5s;--x:65%"></div>
+  <div class="ripple" style="--dur:5.5s;--delay:-3s;--x:80%"></div>
+  <div class="ripple" style="--dur:4s;--delay:-1.5s;--x:10%"></div>
+  <div class="ripple" style="--dur:3.8s;--delay:-2.5s;--x:90%"></div>
+  <div class="ripple" style="--dur:4.2s;--delay:-3.5s;--x:42%"></div>
+</div>
+<div class="foam-layer">
+  <div class="foam-dot" style="--size:3px;--alpha:0.4;--dur:3s;--delay:0s;--x:5%;--y:5px"></div>
+  <div class="foam-dot" style="--size:2px;--alpha:0.3;--dur:4s;--delay:-1s;--x:12%;--y:10px"></div>
+  <div class="foam-dot" style="--size:4px;--alpha:0.5;--dur:2.5s;--delay:-0.5s;--x:22%;--y:3px"></div>
+  <div class="foam-dot" style="--size:2px;--alpha:0.3;--dur:3.5s;--delay:-2s;--x:30%;--y:8px"></div>
+  <div class="foam-dot" style="--size:3px;--alpha:0.4;--dur:4.5s;--delay:-1.5s;--x:40%;--y:12px"></div>
+  <div class="foam-dot" style="--size:2px;--alpha:0.2;--dur:3s;--delay:-0.8s;--x:48%;--y:6px"></div>
+  <div class="foam-dot" style="--size:4px;--alpha:0.5;--dur:3.2s;--delay:-2.5s;--x:55%;--y:2px"></div>
+  <div class="foam-dot" style="--size:2px;--alpha:0.3;--dur:5s;--delay:-3s;--x:65%;--y:9px"></div>
+  <div class="foam-dot" style="--size:3px;--alpha:0.4;--dur:2.8s;--delay:-1.2s;--x:72%;--y:4px"></div>
+  <div class="foam-dot" style="--size:2px;--alpha:0.2;--dur:4s;--delay:-0.3s;--x:82%;--y:11px"></div>
+  <div class="foam-dot" style="--size:3px;--alpha:0.3;--dur:3.5s;--delay:-2.2s;--x:90%;--y:7px"></div>
+</div>
+<div class="note-particle" style="--color:#00e5ff;--dur:4s;--delay:0s;--x:310px;--drift:30px"></div>
+<div class="note-particle" style="--color:#7c4dff;--dur:5s;--delay:-1s;--x:400px;--drift:-20px"></div>
+<div class="note-particle" style="--color:#ffd700;--dur:3.5s;--delay:-2s;--x:520px;--drift:15px"></div>
+<div class="note-particle" style="--color:#00e5ff;--dur:4.5s;--delay:-0.5s;--x:640px;--drift:-35px"></div>
+<div class="note-particle" style="--color:#ff80ab;--dur:5.5s;--delay:-3s;--x:730px;--drift:25px"></div>
+<div class="note-particle" style="--color:#7c4dff;--dur:3.8s;--delay:-1.5s;--x:820px;--drift:-10px"></div>
+<div class="note-particle" style="--color:#ffd700;--dur:4.2s;--delay:-2.5s;--x:910px;--drift:40px"></div>
+<div class="note-particle" style="--color:#00e5ff;--dur:3.2s;--delay:-3.5s;--x:470px;--drift:-25px"></div>
+<div class="note-particle" style="--color:#ff80ab;--dur:4.8s;--delay:-0.8s;--x:580px;--drift:20px"></div>
+<div class="note-particle" style="--color:#ffd700;--dur:3.6s;--delay:-1.8s;--x:360px;--drift:-30px"></div>
+<div class="comb-frame"></div>
+<div class="tine-rack">
+  <div class="tine" style="--dur:1.2s;--delay:0s"></div>
+  <div class="tine" style="--dur:1.5s;--delay:-0.3s"></div>
+  <div class="tine" style="--dur:1.0s;--delay:-0.6s"></div>
+  <div class="tine" style="--dur:1.8s;--delay:-0.1s"></div>
+  <div class="tine" style="--dur:1.3s;--delay:-0.9s"></div>
+  <div class="tine" style="--dur:1.6s;--delay:-0.4s"></div>
+  <div class="tine" style="--dur:1.1s;--delay:-0.7s"></div>
+  <div class="tine" style="--dur:1.4s;--delay:-0.2s"></div>
+  <div class="tine" style="--dur:1.7s;--delay:-0.8s"></div>
+  <div class="tine" style="--dur:1.2s;--delay:-0.5s"></div>
+  <div class="tine" style="--dur:1.5s;--delay:-1.0s"></div>
+  <div class="tine" style="--dur:1.0s;--delay:-0.15s"></div>
+  <div class="tine" style="--dur:1.8s;--delay:-0.45s"></div>
+  <div class="tine" style="--dur:1.3s;--delay:-0.75s"></div>
+  <div class="tine" style="--dur:1.6s;--delay:-0.35s"></div>
+  <div class="tine" style="--dur:1.1s;--delay:-0.65s"></div>
+  <div class="tine" style="--dur:1.4s;--delay:-0.95s"></div>
+  <div class="tine" style="--dur:1.7s;--delay:-0.25s"></div>
+  <div class="tine" style="--dur:1.2s;--delay:-0.55s"></div>
+  <div class="tine" style="--dur:1.5s;--delay:-0.85s"></div>
+  <div class="tine" style="--dur:1.3s;--delay:-0.12s"></div>
+  <div class="tine" style="--dur:1.6s;--delay:-0.42s"></div>
+  <div class="tine" style="--dur:1.1s;--delay:-0.72s"></div>
+  <div class="tine" style="--dur:1.8s;--delay:-0.18s"></div>
+</div>
+<div class="cylinder">
+  <div class="peg-row">
+    <div class="peg"></div><div class="peg"></div><div class="peg"></div>
+    <div class="peg"></div><div class="peg"></div><div class="peg"></div>
+    <div class="peg"></div><div class="peg"></div><div class="peg"></div>
+    <div class="peg"></div><div class="peg"></div><div class="peg"></div>
+    <div class="peg"></div><div class="peg"></div><div class="peg"></div>
+    <div class="peg"></div><div class="peg"></div><div class="peg"></div>
+    <div class="peg"></div><div class="peg"></div><div class="peg"></div>
+    <div class="peg"></div><div class="peg"></div><div class="peg"></div>
+  </div>
+</div>
+<div class="end-cap left"></div>
+<div class="end-cap right"></div>
+<div class="cylinder-base"></div>
+</body>
+</html>

@@ -1,0 +1,499 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=1280,height=720">
+<title>exp-072 — Cellular Chorale</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { background: #0a0014; overflow: hidden; width: 1280px; height: 720px; }
+canvas { display: block; }
+#info {
+  position: absolute; bottom: 12px; left: 50%; transform: translateX(-50%);
+  font: 12px/1.4 Georgia, serif; color: rgba(200,180,255,0.5);
+  text-align: center; pointer-events: none;
+}
+</style>
+</head>
+<body>
+<canvas id="c" width="1280" height="720"></canvas>
+<div id="info">Click to birth a cell. Watch the colony compose its chorale.</div>
+<script>
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d');
+const W = 1280, H = 720;
+
+let audioCtx = null;
+function ensureAudio() {
+  if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  return audioCtx;
+}
+
+// Musical system: pentatonic + octaves for consonance
+const SCALE = [261.63, 293.66, 329.63, 392.00, 440.00]; // C D E G A
+function getFreq(generation, idx) {
+  const octave = Math.min(generation, 4);
+  const base = SCALE[idx % SCALE.length];
+  return base * Math.pow(2, octave - 1);
+}
+
+// Cells inherit from exp-008's biology
+const cells = [];
+let cellId = 0;
+
+function createCell(x, y, generation, parentHue) {
+  const hue = parentHue !== null ? (parentHue + 30 + Math.random() * 20) % 360 : Math.random() * 360;
+  const cell = {
+    id: cellId++,
+    x, y,
+    vx: (Math.random() - 0.5) * 0.3,
+    vy: (Math.random() - 0.5) * 0.3,
+    radius: 24 + Math.random() * 12,
+    hue,
+    generation,
+    age: 0,
+    health: 1.0,
+    infected: false,
+    infectionTime: 0,
+    infectionLevel: 0,
+    dead: false,
+    deathTime: 0,
+    mitosisTimer: 8000 + Math.random() * 12000,
+    mitosisPhase: 0, // 0=growing, 1=dividing
+    mitosisProgress: 0,
+    breathPhase: Math.random() * Math.PI * 2,
+    nucleusAngle: Math.random() * Math.PI * 2,
+    nucleusSpeed: 0.5 + Math.random() * 0.5,
+    organelles: [],
+    noteIdx: Math.floor(Math.random() * SCALE.length),
+    lastSound: 0,
+  };
+  // Create organelles like exp-008
+  for (let i = 0; i < 3 + Math.floor(Math.random() * 3); i++) {
+    cell.organelles.push({
+      angle: Math.random() * Math.PI * 2,
+      dist: cell.radius * 0.5 + Math.random() * cell.radius * 0.3,
+      speed: (Math.random() - 0.5) * 2,
+      size: 3 + Math.random() * 4,
+      hueOff: Math.random() * 60 - 30,
+    });
+  }
+  return cell;
+}
+
+// Sound: each life event produces a note (from exp-050's contagion music)
+function playNote(freq, type, volume, duration) {
+  try {
+    const ac = ensureAudio();
+    const osc = ac.createOscillator();
+    const gain = ac.createGain();
+    osc.frequency.value = freq;
+    osc.type = type;
+    gain.gain.value = volume;
+    gain.gain.exponentialRampToValueAtTime(0.001, ac.currentTime + duration);
+    osc.connect(gain);
+    gain.connect(ac.destination);
+    osc.start(ac.currentTime);
+    osc.stop(ac.currentTime + duration);
+  } catch(e) {}
+}
+
+function playBirthChord(cell) {
+  const freq = getFreq(cell.generation, cell.noteIdx);
+  playNote(freq, 'sine', 0.06, 0.8);
+  // Harmony: a fifth above
+  setTimeout(() => playNote(freq * 1.5, 'sine', 0.03, 0.6), 150);
+}
+
+function playMitosisInterval(parent, child) {
+  const pFreq = getFreq(parent.generation, parent.noteIdx);
+  const cFreq = getFreq(child.generation, child.noteIdx);
+  playNote(pFreq, 'sine', 0.05, 1.2);
+  setTimeout(() => playNote(cFreq, 'triangle', 0.04, 1.0), 300);
+}
+
+function playInfectionDissonance(cell) {
+  const freq = getFreq(cell.generation, cell.noteIdx);
+  playNote(freq * 1.06, 'sawtooth', 0.025, 0.3); // Slightly detuned = dissonant
+}
+
+function playDeathNote(cell) {
+  const freq = getFreq(cell.generation, cell.noteIdx);
+  playNote(freq * 0.5, 'triangle', 0.04, 1.5);
+}
+
+// Particles (from exp-050's death particles, now multi-purpose)
+const particles = [];
+function spawnParticles(x, y, hue, count, spread) {
+  for (let i = 0; i < count; i++) {
+    const angle = Math.random() * Math.PI * 2;
+    const speed = 0.3 + Math.random() * spread;
+    particles.push({
+      x, y,
+      vx: Math.cos(angle) * speed,
+      vy: Math.sin(angle) * speed,
+      life: 1,
+      hue,
+      size: 2 + Math.random() * 3,
+    });
+  }
+}
+
+// Seed initial cell
+function seedCell(x, y) {
+  const cell = createCell(x, y, 1, null);
+  cells.push(cell);
+  playBirthChord(cell);
+  spawnParticles(x, y, cell.hue, 12, 1.5);
+  document.getElementById('info').style.opacity = '0';
+}
+
+canvas.addEventListener('click', (e) => {
+  const rect = canvas.getBoundingClientRect();
+  const mx = (e.clientX - rect.left) * (W / rect.width);
+  const my = (e.clientY - rect.top) * (H / rect.height);
+  if (cells.length < 60) seedCell(mx, my);
+});
+
+// Auto-seed after 3s
+setTimeout(() => {
+  if (cells.length === 0) {
+    seedCell(W * 0.5, H * 0.5);
+    setTimeout(() => { if (cells.length < 3) seedCell(W * 0.3, H * 0.4); }, 2000);
+    setTimeout(() => { if (cells.length < 5) seedCell(W * 0.7, H * 0.6); }, 4000);
+  }
+}, 3000);
+
+function mitosis(parent, now) {
+  if (cells.length >= 60) return;
+  const angle = Math.random() * Math.PI * 2;
+  const dist = parent.radius * 2.2;
+  const child = createCell(
+    parent.x + Math.cos(angle) * dist,
+    parent.y + Math.sin(angle) * dist,
+    parent.generation + 1,
+    parent.hue
+  );
+  child.noteIdx = (parent.noteIdx + Math.floor(Math.random() * 3) + 1) % SCALE.length;
+  cells.push(child);
+  parent.radius *= 0.85;
+  playMitosisInterval(parent, child);
+  spawnParticles(parent.x, parent.y, parent.hue, 8, 1.0);
+  // Bridge particles between parent and child
+  for (let i = 0; i < 6; i++) {
+    const t = i / 5;
+    particles.push({
+      x: parent.x + (child.x - parent.x) * t,
+      y: parent.y + (child.y - parent.y) * t,
+      vx: (Math.random() - 0.5) * 0.3,
+      vy: (Math.random() - 0.5) * 0.3,
+      life: 1.5,
+      hue: (parent.hue + child.hue) / 2,
+      size: 2 + Math.random() * 2,
+    });
+  }
+}
+
+function tryInfect(cell, now) {
+  if (cell.infected || cell.dead) return;
+  cell.infected = true;
+  cell.infectionTime = now;
+  playInfectionDissonance(cell);
+}
+
+let lastTime = performance.now();
+
+function update(now) {
+  const dt = Math.min(now - lastTime, 50);
+  lastTime = now;
+  const t = now * 0.001;
+
+  // Update cells
+  for (let i = cells.length - 1; i >= 0; i--) {
+    const cell = cells[i];
+    if (cell.dead) continue;
+    cell.age += dt;
+    cell.breathPhase += dt * 0.003;
+    cell.nucleusAngle += cell.nucleusSpeed * dt * 0.002;
+
+    // Organelle orbits
+    for (const org of cell.organelles) {
+      org.angle += org.speed * dt * 0.002;
+    }
+
+    // Movement with soft repulsion
+    for (let j = 0; j < cells.length; j++) {
+      if (i === j || cells[j].dead) continue;
+      const dx = cell.x - cells[j].x;
+      const dy = cell.y - cells[j].y;
+      const dist = Math.sqrt(dx * dx + dy * dy);
+      const minDist = cell.radius + cells[j].radius + 8;
+      if (dist < minDist && dist > 0) {
+        const force = (minDist - dist) * 0.002;
+        cell.vx += (dx / dist) * force;
+        cell.vy += (dy / dist) * force;
+      }
+      // Infection spread (from exp-050's contagion)
+      if (cell.infected && !cells[j].infected && dist < minDist * 1.5) {
+        if (cell.infectionLevel > 0.3 && Math.random() < 0.0003 * dt) {
+          tryInfect(cells[j], now);
+        }
+      }
+    }
+
+    // Boundary
+    if (cell.x < cell.radius) cell.vx += 0.05;
+    if (cell.x > W - cell.radius) cell.vx -= 0.05;
+    if (cell.y < cell.radius) cell.vy += 0.05;
+    if (cell.y > H - cell.radius) cell.vy -= 0.05;
+
+    cell.vx *= 0.995;
+    cell.vy *= 0.995;
+    cell.x += cell.vx;
+    cell.y += cell.vy;
+
+    // Infection progression
+    if (cell.infected) {
+      cell.infectionLevel = Math.min(1, (now - cell.infectionTime) / 10000);
+      cell.health = 1 - cell.infectionLevel * 0.8;
+      if (cell.infectionLevel > 0.95) {
+        cell.dead = true;
+        cell.deathTime = now;
+        playDeathNote(cell);
+        spawnParticles(cell.x, cell.y, 0, 15, 2.0);
+      }
+    }
+
+    // Mitosis timer
+    if (!cell.infected && cell.age > cell.mitosisTimer && cell.radius > 15) {
+      mitosis(cell, now);
+      cell.mitosisTimer = cell.age + 10000 + Math.random() * 15000;
+    }
+
+    // Random infection emergence
+    if (!cell.infected && cells.length > 8 && Math.random() < 0.000005 * dt) {
+      tryInfect(cell, now);
+    }
+  }
+
+  // Update particles
+  for (let i = particles.length - 1; i >= 0; i--) {
+    const p = particles[i];
+    p.x += p.vx;
+    p.y += p.vy;
+    p.vy += 0.005;
+    p.life -= 0.006;
+    if (p.life <= 0) particles.splice(i, 1);
+  }
+
+  draw(now, t);
+  requestAnimationFrame(update);
+}
+
+function draw(now, t) {
+  // Dark biological background (from exp-008)
+  ctx.fillStyle = '#0a0014';
+  ctx.fillRect(0, 0, W, H);
+
+  // Subtle background gradient pulse
+  const bgGrad = ctx.createRadialGradient(W/2, H/2, 0, W/2, H/2, 500);
+  bgGrad.addColorStop(0, `rgba(30, 0, 50, ${0.3 + 0.1 * Math.sin(t * 0.5)})`);
+  bgGrad.addColorStop(1, 'rgba(10, 0, 20, 0)');
+  ctx.fillStyle = bgGrad;
+  ctx.fillRect(0, 0, W, H);
+
+  // Draw cells (oldest first)
+  for (const cell of cells) {
+    if (cell.dead) {
+      const fadeOut = Math.max(0, 1 - (now - cell.deathTime) / 6000);
+      if (fadeOut <= 0) continue;
+      ctx.save();
+      ctx.globalAlpha = fadeOut * 0.3;
+      // Ghost outline
+      ctx.strokeStyle = `hsla(${cell.hue}, 40%, 30%, 0.5)`;
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.arc(cell.x, cell.y, cell.radius, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.restore();
+      continue;
+    }
+
+    ctx.save();
+    const breathScale = 1 + 0.06 * Math.sin(cell.breathPhase);
+    const r = cell.radius * breathScale;
+
+    // Membrane glow (from exp-008)
+    const memHue = cell.infected ? 0 : cell.hue;
+    const memSat = cell.infected ? '60%' : '70%';
+    const memLight = cell.infected ? `${30 + cell.infectionLevel * 20}%` : '50%';
+    const glowSize = r + 20;
+    const outerGlow = ctx.createRadialGradient(cell.x, cell.y, r * 0.8, cell.x, cell.y, glowSize);
+    outerGlow.addColorStop(0, `hsla(${memHue}, ${memSat}, ${memLight}, 0.15)`);
+    outerGlow.addColorStop(0.5, `hsla(${memHue}, ${memSat}, ${memLight}, 0.05)`);
+    outerGlow.addColorStop(1, 'transparent');
+    ctx.fillStyle = outerGlow;
+    ctx.beginPath();
+    ctx.arc(cell.x, cell.y, glowSize, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Membrane border with wobble (from exp-008)
+    ctx.strokeStyle = `hsla(${memHue}, 70%, 60%, ${0.4 + 0.2 * Math.sin(t * 2 + cell.id)})`;
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    for (let a = 0; a <= Math.PI * 2; a += 0.1) {
+      const wobble = 1 + 0.03 * Math.sin(a * 5 + t * 3 + cell.id);
+      const tremor = cell.infected ? Math.sin(t * 12 + a * 3) * cell.infectionLevel * 3 : 0;
+      const px = cell.x + Math.cos(a) * r * wobble + tremor;
+      const py = cell.y + Math.sin(a) * r * wobble;
+      if (a === 0) ctx.moveTo(px, py);
+      else ctx.lineTo(px, py);
+    }
+    ctx.closePath();
+    ctx.stroke();
+
+    // Nucleus: layered gradients (from exp-008)
+    const nucR = r * 0.65;
+    const nx = cell.x + Math.cos(cell.nucleusAngle) * r * 0.08;
+    const ny = cell.y + Math.sin(cell.nucleusAngle) * r * 0.08;
+
+    // Primary nucleus
+    const nucGrad = ctx.createRadialGradient(
+      nx - nucR * 0.2, ny - nucR * 0.2, 0,
+      nx, ny, nucR
+    );
+    const nucHue = cell.infected ? (cell.hue + cell.infectionLevel * 120) % 360 : cell.hue;
+    nucGrad.addColorStop(0, `hsla(${(nucHue + 30) % 360}, 80%, 70%, 0.8)`);
+    nucGrad.addColorStop(0.4, `hsla(${nucHue}, 70%, 40%, 0.6)`);
+    nucGrad.addColorStop(0.8, `hsla(${(nucHue + 240) % 360}, 60%, 20%, 0.3)`);
+    nucGrad.addColorStop(1, 'transparent');
+    ctx.fillStyle = nucGrad;
+    ctx.beginPath();
+    ctx.arc(nx, ny, nucR, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Inner nucleus (counter-rotating, from exp-008)
+    ctx.save();
+    ctx.globalCompositeOperation = 'screen';
+    const innerGrad = ctx.createRadialGradient(
+      nx + nucR * 0.15, ny + nucR * 0.15, 0,
+      nx, ny, nucR * 0.8
+    );
+    innerGrad.addColorStop(0, `hsla(${(nucHue + 180) % 360}, 80%, 60%, 0.5)`);
+    innerGrad.addColorStop(0.5, `hsla(${(nucHue + 120) % 360}, 60%, 30%, 0.3)`);
+    innerGrad.addColorStop(1, 'transparent');
+    ctx.fillStyle = innerGrad;
+    ctx.beginPath();
+    ctx.arc(nx, ny, nucR * 0.8, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Hot core
+    const hotGrad = ctx.createRadialGradient(nx, ny, 0, nx, ny, nucR * 0.3);
+    const hotPulse = 0.7 + 0.3 * Math.sin(t * 3 + cell.id * 2);
+    hotGrad.addColorStop(0, `rgba(255, 255, 255, ${hotPulse * 0.6})`);
+    hotGrad.addColorStop(0.4, `hsla(${(nucHue + 60) % 360}, 90%, 70%, ${hotPulse * 0.4})`);
+    hotGrad.addColorStop(1, 'transparent');
+    ctx.fillStyle = hotGrad;
+    ctx.beginPath();
+    ctx.arc(nx, ny, nucR * 0.3, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+
+    // Organelles (from exp-008)
+    ctx.save();
+    ctx.globalCompositeOperation = 'screen';
+    for (const org of cell.organelles) {
+      const ox = cell.x + Math.cos(org.angle) * org.dist * breathScale;
+      const oy = cell.y + Math.sin(org.angle) * org.dist * breathScale;
+      const orgGrad = ctx.createRadialGradient(ox, oy, 0, ox, oy, org.size);
+      const orgHue = (cell.hue + org.hueOff + 360) % 360;
+      orgGrad.addColorStop(0, `hsla(${orgHue}, 80%, 60%, 0.7)`);
+      orgGrad.addColorStop(0.5, `hsla(${orgHue}, 70%, 40%, 0.3)`);
+      orgGrad.addColorStop(1, 'transparent');
+      ctx.fillStyle = orgGrad;
+      ctx.beginPath();
+      ctx.arc(ox, oy, org.size, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.restore();
+
+    // Cilia (from exp-008)
+    const ciliaCount = 12;
+    for (let ci = 0; ci < ciliaCount; ci++) {
+      const ca = (ci / ciliaCount) * Math.PI * 2;
+      const ciliaLen = 10 + 5 * Math.sin(t * 4 + ci * 0.5 + cell.id);
+      const cx = cell.x + Math.cos(ca) * r;
+      const cy = cell.y + Math.sin(ca) * r;
+      const ex = cell.x + Math.cos(ca) * (r + ciliaLen);
+      const ey = cell.y + Math.sin(ca) * (r + ciliaLen);
+      ctx.strokeStyle = `hsla(${cell.hue}, 50%, 60%, ${0.2 + 0.15 * Math.sin(t * 3 + ci)})`;
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(cx, cy);
+      ctx.lineTo(ex, ey);
+      ctx.stroke();
+    }
+
+    ctx.restore();
+  }
+
+  // Draw particles
+  for (const p of particles) {
+    ctx.save();
+    ctx.globalCompositeOperation = 'screen';
+    ctx.globalAlpha = Math.max(0, p.life);
+    ctx.fillStyle = `hsl(${p.hue}, 70%, 60%)`;
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, p.size * Math.max(0.3, p.life), 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+  }
+
+  // Colony report (from exp-050's epidemiological report)
+  const alive = cells.filter(c => !c.dead).length;
+  const infected = cells.filter(c => c.infected && !c.dead).length;
+  const healthy = cells.filter(c => !c.infected && !c.dead).length;
+  const dead = cells.filter(c => c.dead).length;
+  const maxGen = cells.reduce((m, c) => Math.max(m, c.generation), 0);
+
+  const rx = W - 200, ry = 20;
+  ctx.fillStyle = 'rgba(10, 0, 20, 0.7)';
+  ctx.fillRect(rx - 10, ry - 4, 195, 90);
+  ctx.strokeStyle = 'rgba(200, 180, 255, 0.2)';
+  ctx.lineWidth = 1;
+  ctx.strokeRect(rx - 10, ry - 4, 195, 90);
+
+  ctx.font = 'bold 10px "Courier New", monospace';
+  ctx.fillStyle = 'rgba(200, 180, 255, 0.6)';
+  ctx.fillText('COLONY CHORALE', rx, ry + 10);
+  ctx.font = '10px "Courier New", monospace';
+  ctx.fillStyle = 'rgba(100, 255, 150, 0.6)';
+  ctx.fillText('Healthy:    ' + String(healthy).padStart(3), rx, ry + 26);
+  ctx.fillStyle = 'rgba(255, 150, 100, 0.6)';
+  ctx.fillText('Infected:   ' + String(infected).padStart(3), rx, ry + 40);
+  ctx.fillStyle = 'rgba(150, 100, 255, 0.6)';
+  ctx.fillText('Dead:       ' + String(dead).padStart(3), rx, ry + 54);
+  ctx.fillStyle = 'rgba(200, 200, 255, 0.6)';
+  ctx.fillText('Generation: ' + String(maxGen).padStart(3), rx, ry + 68);
+
+  // Musical staff hint at bottom
+  ctx.strokeStyle = 'rgba(200, 180, 255, 0.08)';
+  ctx.lineWidth = 1;
+  for (let l = 0; l < 5; l++) {
+    const ly = H - 60 + l * 8;
+    ctx.beginPath();
+    ctx.moveTo(40, ly);
+    ctx.lineTo(W - 40, ly);
+    ctx.stroke();
+  }
+
+  // Title
+  ctx.font = 'italic 16px Georgia, serif';
+  ctx.fillStyle = 'rgba(200, 180, 255, 0.4)';
+  ctx.fillText('Cellular Chorale', 20, H - 16);
+}
+
+requestAnimationFrame(update);
+</script>
+</body>
+</html>

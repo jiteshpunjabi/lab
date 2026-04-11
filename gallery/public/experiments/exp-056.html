@@ -1,0 +1,354 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=1280,height=720">
+<title>exp-056 — Living Loom</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { background: #1a0a2e; overflow: hidden; cursor: crosshair; width: 1280px; height: 720px; }
+canvas { display: block; }
+#info {
+  position: fixed; bottom: 12px; left: 50%; transform: translateX(-50%);
+  color: rgba(255,220,180,0.6); font: 13px/1.4 'Georgia', serif;
+  text-align: center; pointer-events: none; letter-spacing: 1px;
+}
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="info">drag to distort the weave &middot; threads interlace by over-under rules</div>
+<script>
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d');
+const W = 1280, H = 720;
+canvas.width = W; canvas.height = H;
+
+// Weaving parameters
+const WARP_COUNT = 48;
+const WEFT_COUNT = 28;
+const GAP_X = W / WARP_COUNT;
+const GAP_Y = H / WEFT_COUNT;
+const THREAD_W = 5;
+
+// Color palettes - rich textile colors
+const warpColors = [];
+const weftColors = [];
+
+for (let i = 0; i < WARP_COUNT; i++) {
+  const t = i / WARP_COUNT;
+  // Warm spectrum: deep reds, crimsons, golds, amber
+  const h = (t * 80 + 340) % 360;
+  const s = 65 + Math.sin(t * Math.PI * 6) * 20;
+  const l = 50 + Math.sin(t * Math.PI * 4) * 12;
+  warpColors.push({ h, s, l });
+}
+
+for (let i = 0; i < WEFT_COUNT; i++) {
+  const t = i / WEFT_COUNT;
+  // Cool spectrum: sapphire, teal, violet, cyan
+  const h = 190 + t * 140;
+  const s = 60 + Math.sin(t * Math.PI * 3) * 25;
+  const l = 45 + Math.sin(t * Math.PI * 5) * 12;
+  weftColors.push({ h, s, l });
+}
+
+// Weave pattern types
+const PATTERNS = {
+  PLAIN: (i, j) => (i + j) % 2 === 0,
+  TWILL: (i, j, shift) => ((i + j + shift) % 4) < 2,
+  SATIN: (i, j, shift) => ((i * 3 + j + shift) % 5) === 0,
+  HERRINGBONE: (i, j, shift) => {
+    const block = Math.floor((i + shift) / 4);
+    return block % 2 === 0
+      ? ((i + j + shift) % 4) < 2
+      : ((i - j + shift + 400) % 4) < 2;
+  }
+};
+
+let patternShift = 0;
+let currentPattern = 'HERRINGBONE';
+
+// Displacement field for each crossing point
+const crossings = [];
+for (let i = 0; i < WARP_COUNT; i++) {
+  crossings[i] = [];
+  for (let j = 0; j < WEFT_COUNT; j++) {
+    crossings[i][j] = { dx: 0, dy: 0, vx: 0, vy: 0 };
+  }
+}
+
+let mouseX = -1000, mouseY = -1000;
+let pmouseX = -1000, pmouseY = -1000;
+let mouseDown = false;
+
+canvas.addEventListener('mousemove', e => {
+  pmouseX = mouseX; pmouseY = mouseY;
+  mouseX = e.clientX; mouseY = e.clientY;
+});
+canvas.addEventListener('mousedown', () => mouseDown = true);
+canvas.addEventListener('mouseup', () => mouseDown = false);
+canvas.addEventListener('mouseleave', () => { mouseDown = false; mouseX = -1000; });
+
+function baseX(i) { return (i + 0.5) * GAP_X; }
+function baseY(j) { return (j + 0.5) * GAP_Y; }
+
+let time = 0;
+
+function update() {
+  time += 0.016;
+  patternShift += 0.015;
+
+  // Mouse interaction: drag threads
+  if (mouseDown && mouseX > 0) {
+    const radius = 100;
+    const velX = mouseX - pmouseX;
+    const velY = mouseY - pmouseY;
+    for (let i = 0; i < WARP_COUNT; i++) {
+      for (let j = 0; j < WEFT_COUNT; j++) {
+        const x = baseX(i) + crossings[i][j].dx;
+        const y = baseY(j) + crossings[i][j].dy;
+        const ddx = x - mouseX;
+        const ddy = y - mouseY;
+        const dist = Math.sqrt(ddx * ddx + ddy * ddy);
+        if (dist < radius) {
+          const force = (1 - dist / radius);
+          const c = crossings[i][j];
+          c.vx += velX * force * 0.4;
+          c.vy += velY * force * 0.4;
+        }
+      }
+    }
+  }
+
+  // Physics: spring-back + tension propagation + damping
+  for (let i = 0; i < WARP_COUNT; i++) {
+    for (let j = 0; j < WEFT_COUNT; j++) {
+      const c = crossings[i][j];
+      // Spring back to origin
+      c.vx -= c.dx * 0.03;
+      c.vy -= c.dy * 0.03;
+      // Damping
+      c.vx *= 0.92;
+      c.vy *= 0.92;
+      // Integrate
+      c.dx += c.vx;
+      c.dy += c.vy;
+    }
+  }
+
+  // Tension propagation (fabric stiffness)
+  for (let iter = 0; iter < 2; iter++) {
+    for (let i = 0; i < WARP_COUNT; i++) {
+      for (let j = 0; j < WEFT_COUNT; j++) {
+        const c = crossings[i][j];
+        let avgDx = 0, avgDy = 0, count = 0;
+        if (i > 0) { avgDx += crossings[i-1][j].dx; avgDy += crossings[i-1][j].dy; count++; }
+        if (i < WARP_COUNT-1) { avgDx += crossings[i+1][j].dx; avgDy += crossings[i+1][j].dy; count++; }
+        if (j > 0) { avgDx += crossings[i][j-1].dx; avgDy += crossings[i][j-1].dy; count++; }
+        if (j < WEFT_COUNT-1) { avgDx += crossings[i][j+1].dx; avgDy += crossings[i][j+1].dy; count++; }
+        if (count > 0) {
+          avgDx /= count; avgDy /= count;
+          c.dx = c.dx * 0.75 + avgDx * 0.25;
+          c.dy = c.dy * 0.75 + avgDy * 0.25;
+        }
+      }
+    }
+  }
+}
+
+function getCrossPos(i, j) {
+  const c = crossings[i][j];
+  // Add subtle breathing motion
+  const breath_dx = Math.sin(time * 0.7 + i * 0.4 + j * 0.2) * 1.5;
+  const breath_dy = Math.cos(time * 0.6 + j * 0.5 + i * 0.15) * 1.5;
+  return {
+    x: baseX(i) + c.dx + breath_dx,
+    y: baseY(j) + c.dy + breath_dy
+  };
+}
+
+function warpOnTop(i, j) {
+  const shift = Math.floor(patternShift);
+  return PATTERNS[currentPattern](i, j, shift);
+}
+
+function drawThread(points, color, width, shadow) {
+  if (points.length < 2) return;
+
+  if (shadow) {
+    ctx.beginPath();
+    ctx.moveTo(points[0].x + 1.5, points[0].y + 1.5);
+    for (let k = 1; k < points.length; k++) {
+      ctx.lineTo(points[k].x + 1.5, points[k].y + 1.5);
+    }
+    ctx.strokeStyle = 'rgba(0,0,0,0.35)';
+    ctx.lineWidth = width + 2;
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+    ctx.stroke();
+  }
+
+  ctx.beginPath();
+  ctx.moveTo(points[0].x, points[0].y);
+  for (let k = 1; k < points.length; k++) {
+    // Use quadratic curves for smoother threads
+    if (k < points.length - 1) {
+      const mx = (points[k].x + points[k+1].x) / 2;
+      const my = (points[k].y + points[k+1].y) / 2;
+      ctx.quadraticCurveTo(points[k].x, points[k].y, mx, my);
+    } else {
+      ctx.lineTo(points[k].x, points[k].y);
+    }
+  }
+  ctx.strokeStyle = `hsl(${color.h}, ${color.s}%, ${color.l}%)`;
+  ctx.lineWidth = width;
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
+  ctx.stroke();
+
+  // Thread highlight (sheen)
+  ctx.strokeStyle = `hsla(${color.h}, ${color.s + 10}%, ${color.l + 25}%, 0.25)`;
+  ctx.lineWidth = width * 0.3;
+  ctx.stroke();
+}
+
+function draw() {
+  // Background
+  ctx.fillStyle = '#12081f';
+  ctx.fillRect(0, 0, W, H);
+
+  // Subtle loom frame
+  ctx.strokeStyle = 'rgba(139, 90, 43, 0.25)';
+  ctx.lineWidth = 6;
+  ctx.strokeRect(6, 6, W - 12, H - 12);
+  ctx.strokeStyle = 'rgba(180, 130, 60, 0.1)';
+  ctx.lineWidth = 2;
+  ctx.strokeRect(10, 10, W - 20, H - 20);
+
+  // We need to draw in layers to get proper over-under:
+  // Layer 1: warp threads that go UNDER at each crossing
+  // Layer 2: weft threads (full)
+  // Layer 3: warp segments that go OVER
+
+  // Strategy: Draw segments between crossings.
+  // For each crossing, we decide who's on top.
+  // We'll render in 3 passes:
+  // Pass 1: Warp "under" segments (drawn first, will be occluded)
+  // Pass 2: All weft segments
+  // Pass 3: Warp "over" segments (with shadow, drawn on top)
+
+  // Actually simpler: draw warp full, then for each weft crossing where weft is on top,
+  // draw a short weft segment over the warp thread.
+
+  // PASS 1: Draw full warp threads (vertical)
+  for (let i = 0; i < WARP_COUNT; i++) {
+    const points = [];
+    for (let j = 0; j < WEFT_COUNT; j++) {
+      const p = getCrossPos(i, j);
+      // Add vertical undulation at crossings where warp goes under
+      const under = !warpOnTop(i, j);
+      if (under) {
+        p.y += 2; // slight dip when going under
+      } else {
+        p.y -= 2; // slight rise when going over
+      }
+      points.push(p);
+    }
+    drawThread(points, warpColors[i], THREAD_W, false);
+  }
+
+  // PASS 2: Draw weft segments where weft goes UNDER warp (behind everything)
+  // (These are partially hidden, so we draw them with no shadow)
+  for (let j = 0; j < WEFT_COUNT; j++) {
+    for (let i = 0; i < WARP_COUNT - 1; i++) {
+      if (warpOnTop(i, j) && warpOnTop(i + 1, j)) {
+        // Warp is on top at both ends -> weft goes under here
+        const p1 = getCrossPos(i, j);
+        const p2 = getCrossPos(i + 1, j);
+        p1.y += 1; p2.y += 1;
+        drawThread([p1, p2], weftColors[j], THREAD_W - 1, false);
+      }
+    }
+  }
+
+  // PASS 3: Draw weft segments where weft goes OVER warp (on top, with shadow)
+  for (let j = 0; j < WEFT_COUNT; j++) {
+    // Find runs where weft is on top (warp is NOT on top)
+    let runStart = -1;
+    for (let i = 0; i <= WARP_COUNT; i++) {
+      const weftOver = i < WARP_COUNT && !warpOnTop(i, j);
+      if (weftOver && runStart === -1) {
+        runStart = Math.max(0, i - 1); // extend one crossing before
+      } else if (!weftOver && runStart !== -1) {
+        const runEnd = Math.min(WARP_COUNT - 1, i); // extend one crossing after
+        const points = [];
+        for (let k = runStart; k <= runEnd; k++) {
+          const p = getCrossPos(k, j);
+          p.y -= 2; // rise over the warp
+          points.push(p);
+        }
+        drawThread(points, weftColors[j], THREAD_W + 0.5, true);
+        runStart = -1;
+      }
+    }
+  }
+
+  // Draw crossing highlights near mouse
+  if (mouseX > 0 && mouseX < W) {
+    for (let i = 0; i < WARP_COUNT; i++) {
+      for (let j = 0; j < WEFT_COUNT; j++) {
+        const p = getCrossPos(i, j);
+        const dx = p.x - mouseX;
+        const dy = p.y - mouseY;
+        const dist = Math.sqrt(dx * dx + dy * dy);
+        if (dist < 80) {
+          const alpha = (1 - dist / 80) * 0.4;
+          ctx.fillStyle = `rgba(255, 230, 180, ${alpha})`;
+          ctx.beginPath();
+          ctx.arc(p.x, p.y, 3, 0, Math.PI * 2);
+          ctx.fill();
+        }
+      }
+    }
+  }
+
+  // Pattern label
+  ctx.font = '11px Georgia, serif';
+  ctx.fillStyle = 'rgba(180, 150, 120, 0.4)';
+  ctx.textAlign = 'right';
+  ctx.fillText(currentPattern.toLowerCase() + ' weave', W - 20, H - 16);
+
+  // Tension indicator (show total displacement)
+  let totalDisp = 0;
+  for (let i = 0; i < WARP_COUNT; i++) {
+    for (let j = 0; j < WEFT_COUNT; j++) {
+      const c = crossings[i][j];
+      totalDisp += Math.sqrt(c.dx * c.dx + c.dy * c.dy);
+    }
+  }
+  const tension = Math.min(totalDisp / 500, 1);
+  if (tension > 0.01) {
+    ctx.fillStyle = `rgba(255, ${200 - tension * 150}, ${180 - tension * 180}, ${0.3 + tension * 0.4})`;
+    ctx.textAlign = 'left';
+    ctx.fillText(`tension: ${(tension * 100).toFixed(0)}%`, 20, H - 16);
+  }
+}
+
+// Cycle patterns with click
+canvas.addEventListener('dblclick', () => {
+  const patterns = Object.keys(PATTERNS);
+  const idx = patterns.indexOf(currentPattern);
+  currentPattern = patterns[(idx + 1) % patterns.length];
+});
+
+function loop() {
+  update();
+  draw();
+  requestAnimationFrame(loop);
+}
+
+loop();
+</script>
+</body>
+</html>

@@ -1,0 +1,349 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=1280,height=720">
+<title>Three Acts of Geometry</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { background: #0a0a1a; overflow: hidden; width: 1280px; height: 720px; }
+  canvas { display: block; }
+  #timeline {
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    width: 1280px;
+    height: 4px;
+    background: rgba(255,255,255,0.1);
+    z-index: 10;
+  }
+  #progress {
+    height: 100%;
+    width: 0%;
+  }
+  #act-label {
+    position: fixed;
+    top: 24px;
+    left: 50%;
+    transform: translateX(-50%);
+    font-family: 'Georgia', serif;
+    font-size: 14px;
+    letter-spacing: 6px;
+    text-transform: uppercase;
+    color: rgba(255,255,255,0.4);
+    z-index: 10;
+  }
+  #act-title {
+    position: fixed;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    font-family: 'Georgia', serif;
+    font-size: 48px;
+    letter-spacing: 12px;
+    text-transform: uppercase;
+    color: white;
+    z-index: 20;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.4s;
+  }
+</style>
+</head>
+<body>
+<canvas id="c" width="1280" height="720"></canvas>
+<div id="timeline"><div id="progress"></div></div>
+<div id="act-label"></div>
+<div id="act-title"></div>
+<script>
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d');
+const W = 1280, H = 720;
+const progressEl = document.getElementById('progress');
+const actLabel = document.getElementById('act-label');
+const actTitle = document.getElementById('act-title');
+
+const ACT_1_DUR = 8000;
+const CUT_1_DUR = 120;
+const ACT_2_DUR = 7000;
+const CUT_2_DUR = 120;
+const ACT_3_DUR = 9000;
+const PAUSE_DUR = 2000;
+const TOTAL = ACT_1_DUR + CUT_1_DUR + ACT_2_DUR + CUT_2_DUR + ACT_3_DUR + PAUSE_DUR;
+
+const SHAPE_COUNT = 36;
+let shapes = [];
+let lastAct = -99;
+let startTime = performance.now();
+
+const ACT_COLORS = [
+  ['#4ecdc4','#45b7d1','#96ceb4','#88d8b0','#7ec8e3','#a8e6cf'],
+  ['#ff6b6b','#ff4757','#ff6348','#ee5a24','#f368e0','#ff9ff3'],
+  ['#ffd32a','#ffdd59','#ffa502','#eccc68','#fff8a6','#ffffff']
+];
+const ACT_BG = ['#07091a','#1a0508','#0d0b03'];
+const PROGRESS_COLORS = ['#4ecdc4','#ff4757','#ffd32a'];
+
+class Shape {
+  constructor(i) {
+    this.i = i;
+    this.type = i % 3;
+    this.baseSize = 18 + (i % 7) * 6;
+    this.size = this.baseSize;
+
+    const cols = 6, rows = 6;
+    const col = i % cols, row = Math.floor(i / cols);
+    this.gridX = 240 + col * (800 / (cols - 1));
+    this.gridY = 110 + row * (500 / (rows - 1));
+
+    const angle = (i / SHAPE_COUNT) * Math.PI * 2;
+    this.x = W / 2 + Math.cos(angle) * 900;
+    this.y = H / 2 + Math.sin(angle) * 900;
+    this.rotation = Math.random() * Math.PI * 4;
+    this.rotSpeed = 0;
+
+    this.vx = 0;
+    this.vy = 0;
+    this.explodeAngle = (i / SHAPE_COUNT) * Math.PI * 2 + Math.random() * 0.5;
+    this.explodeSpeed = 4 + Math.random() * 7;
+
+    const t = i / SHAPE_COUNT;
+    const spiralAngle = t * Math.PI * 5;
+    const spiralR = 30 + t * 260;
+    this.finalX = W / 2 + Math.cos(spiralAngle) * spiralR;
+    this.finalY = H / 2 + Math.sin(spiralAngle) * spiralR;
+    this.finalRotation = spiralAngle;
+
+    this.opacity = 0;
+    this.color = ACT_COLORS[0][i % 6];
+    this.phase = i * 0.7;
+  }
+}
+
+function init() {
+  shapes = [];
+  for (let i = 0; i < SHAPE_COUNT; i++) shapes.push(new Shape(i));
+  startTime = performance.now();
+  lastAct = -99;
+}
+
+function getAct(elapsed) {
+  if (elapsed < ACT_1_DUR) return { act: 0, t: elapsed / ACT_1_DUR };
+  elapsed -= ACT_1_DUR;
+  if (elapsed < CUT_1_DUR) return { act: -1, t: elapsed / CUT_1_DUR };
+  elapsed -= CUT_1_DUR;
+  if (elapsed < ACT_2_DUR) return { act: 1, t: elapsed / ACT_2_DUR };
+  elapsed -= ACT_2_DUR;
+  if (elapsed < CUT_2_DUR) return { act: -2, t: elapsed / CUT_2_DUR };
+  elapsed -= CUT_2_DUR;
+  if (elapsed < ACT_3_DUR) return { act: 2, t: elapsed / ACT_3_DUR };
+  elapsed -= ACT_3_DUR;
+  return { act: 99, t: elapsed / PAUSE_DUR };
+}
+
+function easeInOutCubic(t) {
+  return t < 0.5 ? 4*t*t*t : 1 - Math.pow(-2*t+2, 3)/2;
+}
+
+function easeOutElastic(t) {
+  if (t <= 0 || t >= 1) return Math.max(0, Math.min(1, t));
+  return Math.pow(2, -10*t) * Math.sin((t*10 - 0.75) * (2*Math.PI)/3) + 1;
+}
+
+function drawShape(s, time) {
+  ctx.save();
+  ctx.translate(s.x, s.y);
+  ctx.rotate(s.rotation);
+  ctx.globalAlpha = Math.max(0, Math.min(1, s.opacity));
+  ctx.fillStyle = s.color;
+  ctx.shadowColor = s.color;
+  ctx.shadowBlur = 12;
+  const sz = s.size * (0.92 + 0.08 * Math.sin(time * 0.002 + s.phase));
+  if (s.type === 0) {
+    ctx.beginPath();
+    ctx.arc(0, 0, sz/2, 0, Math.PI*2);
+    ctx.fill();
+  } else if (s.type === 1) {
+    ctx.fillRect(-sz/2, -sz/2, sz, sz);
+  } else {
+    ctx.beginPath();
+    ctx.moveTo(0, -sz/2);
+    ctx.lineTo(sz/2, sz/2);
+    ctx.lineTo(-sz/2, sz/2);
+    ctx.closePath();
+    ctx.fill();
+  }
+  ctx.restore();
+}
+
+function drawLines(maxDist, color, baseAlpha) {
+  ctx.strokeStyle = color;
+  ctx.lineWidth = 0.8;
+  for (let i = 0; i < shapes.length; i++) {
+    for (let j = i+1; j < shapes.length; j++) {
+      const dx = shapes[i].x - shapes[j].x;
+      const dy = shapes[i].y - shapes[j].y;
+      const d = Math.sqrt(dx*dx + dy*dy);
+      if (d < maxDist) {
+        ctx.globalAlpha = baseAlpha * (1 - d/maxDist) * Math.min(shapes[i].opacity, shapes[j].opacity);
+        ctx.beginPath();
+        ctx.moveTo(shapes[i].x, shapes[i].y);
+        ctx.lineTo(shapes[j].x, shapes[j].y);
+        ctx.stroke();
+      }
+    }
+  }
+  ctx.globalAlpha = 1;
+}
+
+function showTitle(text) {
+  actTitle.textContent = text;
+  actTitle.style.opacity = '1';
+  setTimeout(() => { actTitle.style.opacity = '0'; }, 1200);
+}
+
+function render(time) {
+  const elapsed = (time - startTime) % TOTAL;
+  const totalProgress = elapsed / TOTAL;
+  const { act, t } = getAct(elapsed);
+
+  // Act transitions
+  if (act >= 0 && act <= 2 && act !== lastAct) {
+    lastAct = act;
+    actLabel.textContent = act === 0 ? 'ACT I \u2014 ASSEMBLY' : act === 1 ? 'ACT II \u2014 RUPTURE' : 'ACT III \u2014 TRANSFIGURATION';
+    if (act === 0) showTitle('ACT I');
+    if (act === 1) {
+      showTitle('ACT II');
+      shapes.forEach(s => {
+        s.vx = Math.cos(s.explodeAngle) * s.explodeSpeed;
+        s.vy = Math.sin(s.explodeAngle) * s.explodeSpeed;
+        s.rotSpeed = (Math.random() - 0.5) * 0.2;
+      });
+    }
+    if (act === 2) showTitle('ACT III');
+  }
+
+  // End pause / loop
+  if (act === 99) {
+    // Fade to black
+    ctx.fillStyle = `rgba(0,0,0,${Math.min(1, t * 2)})`;
+    ctx.fillRect(0, 0, W, H);
+    if (t > 0.5) {
+      ctx.fillStyle = `rgba(255,255,255,${0.4 * Math.max(0, 1 - (t - 0.5)*4)})`;
+      ctx.font = '14px Georgia';
+      ctx.textAlign = 'center';
+      ctx.fillText('FIN', W/2, H/2);
+    }
+    if (t >= 0.95) init();
+    progressEl.style.width = (totalProgress * 100) + '%';
+    progressEl.style.background = '#666';
+    requestAnimationFrame(render);
+    return;
+  }
+
+  // Smash cut: white flash
+  if (act < 0) {
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(0, 0, W, H);
+    ctx.fillStyle = `rgba(0,0,0,${t})`;
+    ctx.fillRect(0, 0, W, H);
+    progressEl.style.width = (totalProgress * 100) + '%';
+    progressEl.style.background = PROGRESS_COLORS[Math.min(-act-1, 2)];
+    requestAnimationFrame(render);
+    return;
+  }
+
+  // Background
+  ctx.fillStyle = ACT_BG[act];
+  ctx.fillRect(0, 0, W, H);
+
+  // Update shapes
+  shapes.forEach((s, i) => {
+    if (act === 0) {
+      // Shapes drift in, settle into grid
+      s.x += (s.gridX - s.x) * (0.02 + t * 0.06);
+      s.y += (s.gridY - s.y) * (0.02 + t * 0.06);
+      s.rotation *= 0.96;
+      s.opacity = Math.min(1, t * 4 - (i / SHAPE_COUNT) * 1.5);
+      s.size = s.baseSize;
+      s.color = ACT_COLORS[0][i % 6];
+    } else if (act === 1) {
+      if (t < 0.2) {
+        s.x += s.vx * 2.5;
+        s.y += s.vy * 2.5;
+      } else {
+        s.x += s.vx;
+        s.y += s.vy;
+        s.vx *= 0.992;
+        s.vy *= 0.992;
+        if (s.x < 20 || s.x > W-20) { s.vx *= -0.85; s.x = Math.max(20, Math.min(W-20, s.x)); }
+        if (s.y < 20 || s.y > H-20) { s.vy *= -0.85; s.y = Math.max(20, Math.min(H-20, s.y)); }
+        // Late gravity toward center
+        if (t > 0.6) {
+          const pull = (t - 0.6) * 0.03;
+          s.vx += (W/2 - s.x) * pull * 0.008;
+          s.vy += (H/2 - s.y) * pull * 0.008;
+        }
+      }
+      s.rotation += s.rotSpeed;
+      s.opacity = 0.6 + 0.4 * Math.abs(Math.sin(time * 0.008 + i));
+      s.color = ACT_COLORS[1][i % 6];
+      s.size = s.baseSize * (1 + 0.15 * Math.sin(time * 0.015 + i));
+    } else if (act === 2) {
+      const delay = (i / SHAPE_COUNT) * 0.35;
+      const localT = Math.max(0, (t - delay) / (1 - delay));
+      s.x += (s.finalX - s.x) * (0.03 + localT * 0.05);
+      s.y += (s.finalY - s.y) * (0.03 + localT * 0.05);
+      s.rotation += (s.finalRotation - s.rotation) * 0.02;
+      s.opacity = Math.min(1, localT * 3);
+      s.color = ACT_COLORS[2][i % 6];
+      s.size = s.baseSize * (0.8 + localT * 0.4);
+      // Gentle breathing at end
+      if (localT > 0.7) {
+        s.x += Math.cos(time * 0.0008 + i * 0.4) * 1.5;
+        s.y += Math.sin(time * 0.0008 + i * 0.4) * 1.5;
+      }
+    }
+  });
+
+  // Screen shake act 2
+  if (act === 1 && t < 0.25) {
+    const shk = (0.25 - t) * 16;
+    ctx.save();
+    ctx.translate((Math.random()-0.5)*shk, (Math.random()-0.5)*shk);
+  }
+
+  // Connections
+  if (act === 0) drawLines(180, '#4ecdc4', 0.12 * Math.min(1, t*3));
+  else if (act === 1) drawLines(100, '#ff4757', 0.2 * (0.5 + 0.5*Math.sin(time*0.008)));
+  else if (act === 2) drawLines(160, '#ffd32a', 0.2 * Math.min(1, t*2));
+
+  // Shapes
+  shapes.forEach(s => drawShape(s, time));
+
+  // Act 3 central glow
+  if (act === 2 && t > 0.25) {
+    const a = Math.min(0.35, (t-0.25)*0.5);
+    const g = ctx.createRadialGradient(W/2, H/2, 0, W/2, H/2, 300);
+    g.addColorStop(0, `rgba(255,211,42,${a})`);
+    g.addColorStop(0.5, `rgba(255,165,2,${a*0.25})`);
+    g.addColorStop(1, 'rgba(0,0,0,0)');
+    ctx.fillStyle = g;
+    ctx.fillRect(0, 0, W, H);
+  }
+
+  if (act === 1 && t < 0.25) ctx.restore();
+
+  // Progress bar
+  const pIdx = Math.max(0, Math.min(2, act));
+  progressEl.style.width = (totalProgress * 100) + '%';
+  progressEl.style.background = PROGRESS_COLORS[pIdx];
+
+  requestAnimationFrame(render);
+}
+
+init();
+requestAnimationFrame(render);
+</script>
+</body>
+</html>
